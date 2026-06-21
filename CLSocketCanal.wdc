@@ -219,11 +219,17 @@ class :
      type : 458752
    -
      name : GetFile
-     internal_properties : BQAAAAUAAAA1qXcd/ACZ9xsYiCAUwNfRlQK/Pl7Hh8RtRnmI3fKJTl62Rxca7Wsyi2/iRuY2uT3vOTWo+1zFk+g7AP9843TYarHVG1VCioAkYIvYeDSnRCYmrPZldS/iTtAoYPOV+czln6ZavIgtxDZQztOCEc4Lf1Ymr0y8AheOtsA4q+H5pFDVa9FNF3axRPzVpVAw7kagpA==
+     internal_properties : BQAAAAUAAAD36zHHNzqf1YsqeKhuAost9QyLwtABFfotENHsY2gZ1tIU31foK+W8B+1m+nSsxbHfm/GkZcbbPfhdiIe+tbDcWiNV06NQpF7AYcpRx8WSEW3D21cMjgb70UHvmaq+VJnA8JlXt5UwyTVd2ci9xpX8Trv96APNobyVszOFLo7Ane9K+sJcAL0SB11kzofqtIhi5g==
      procedure_id : 1869980601211127926
      type_code : 12
      code : |1+
       procédure publique  GetFile() <métier>
+      
+      m_UrlRecu	= Remplace(m_UrlRecu, "/", "\") // Uniformiser les séparateurs Windows
+      m_UrlRecu	= Remplace(m_UrlRecu, "..\", "") // INTERDIRE de remonter d'un dossier
+      
+      
+      
       
       m_CodeReponse = "200 OK"
       
