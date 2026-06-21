@@ -15,6 +15,9 @@ class :
   p_codes :
    -
      code : |1+
+      //achraf
+      
+      
       CLApplication est une Classe
       	
       prive
@@ -29,9 +32,6 @@ class :
       	m_GestionnaireVHost			est CLGestionnaireVHost dynamique
       	m_CodeReponse				est un tableau associatif de buffers 
       fin
-      
-      
-      
       
      type : 131072
   procedures :
