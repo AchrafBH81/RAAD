@@ -23,7 +23,8 @@ class :
       	m_json				est une chaîne
       	m_key				est une chaine
       	m_valkey			est une chaine  
-      	m_Sql				est une chaine  	
+      	m_Sql				est une chaine  
+      		
       fin
      type : 131072
   procedures :

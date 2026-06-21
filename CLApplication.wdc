@@ -303,7 +303,9 @@ class :
       // Cela permet de cloner l'objet "prototype" préchargé dans m_Base.m_Table afin 
       // d'obtenir une instance physiquement indépendante et propre à cette requête HTTP.
       // Cela garantit que les données (ex: m_json, m_erreur) ne s'écrasent pas entre deux clients simultanés (Thread-Safe).
-      L_record est  CLRecord
+      
+      // On alloue une VRAIE nouvelle instance totalement isolée en mémoire
+      L_record est un CLRecord dynamique = allouer un CLRecord
       L_record <= m_Base.m_Table[l_HttpReq.m_Parametres["table"]]
       
       
