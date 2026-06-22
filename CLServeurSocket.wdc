@@ -153,7 +153,8 @@ class :
      code : |1+
       procédure privée _LancerServeurHttpsEntrantAsync()
       
-      LancerServeurHttpsEntrantAsync(443,8080,fRepExe+["/"]+"systeme/SSl/cert.pem",fRepExe+["/"]+"systeme/SSl/key.pem")
+      
+      LancerServeurHttpsEntrantAsync(443,8080,m_CLconfiguration.m_CheminCertSSL,m_CLconfiguration.m_CheminCleSSL)
      type : 458752
   properties :
    -

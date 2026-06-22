@@ -67,17 +67,7 @@ class :
       
       procédure publique _LiveMemoire()
       
-      lbResultat						= AppelDLL32("KERNEL32.DLL", "GlobalMemoryStatusEx", &lstStatex)
-      MemoireUtilisee					= lstStatex:dwMemoryLoad
-      MemoirePhysiqueTotale			= lstStatex:ullTotalPhys / nOctets
-      MemoirePhysiqueDisponible		= lstStatex:ullAvailPhys / nOctets
-      MemoirePagineeTotale			= lstStatex:ullTotalPageFile / nOctets
-      MemoirePaginéeLibre				= lstStatex:ullAvailPageFile / nOctets
-      MemoireVirtuelleTotale			= lstStatex:ullTotalVirtual / nOctets
-      MemoireVirtuelleLibre			= lstStatex:ullAvailVirtual / nOctets
-      MemoireVirtuelleEtendueLibre	= lstStatex:ullAvailExtendedVirtual / nOctets
       
-      Multitâche(-1)
      type : 458752
   properties :
    -

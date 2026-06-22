@@ -277,7 +277,7 @@ class :
       L_record est un CLRecord dynamique = allouer un CLRecord
       L_record <= m_Base.m_Table[l_HttpReq.m_Parametres["table"]]
       
-      L_record.m_json = l_HttpReq.m_CorpReq
+      L_record.m_json = l_HttpReq.m_CorpsReq
       L_record.Update()
       
       SI L_record.m_erreur <> "" ALORS
@@ -309,7 +309,7 @@ class :
       
       
       
-      L_record.m_json = l_HttpReq.m_CorpReq
+      L_record.m_json = l_HttpReq.m_CorpsReq
       L_record.Create()
       
       SI L_record.m_erreur <> "" ALORS

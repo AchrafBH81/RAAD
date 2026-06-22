@@ -208,13 +208,13 @@ class :
       
       
       CAS ERREUR:
-      m_base.Connexion()
+      m_base.Déconnexion()
       m_erreur = ErreurInfo()
       
       
       
       CAS EXCEPTION:
-      m_base.Connexion()
+      m_base.Déconnexion()
       m_erreur = ExceptionInfo()
       
       

@@ -23,9 +23,9 @@ class :
       	m_MessageSocketReponse	est chaine 
       	m_CanalOuvert			est un booléen
       	
-      	m_UrlRecu				est une chaîne
+      	m_UrlRecue			est une chaîne
       	m_PointDentre			est une chaîne 		
-      	m_CorpReq				est une chaîne 
+      	m_CorpsReq				est une chaîne 
       	m_HeaderReq				est une chaîne 
       	m_TypeReq				est une chaîne
       	m_PositionUrl			est un entier
@@ -65,11 +65,11 @@ class :
       procédure AnalyseReq()
       
       m_HeaderReq		= Décode(m_MessageSocketRecu[[ À Position(m_MessageSocketRecu,RC+RC)-1]],encodeURLVersUTF8)
-      m_CorpReq		= Décode(m_MessageSocketRecu[[Position(m_MessageSocketRecu,RC+RC)+4 À ]],encodeURLVersUTF8)
+      m_CorpsReq		= Décode(m_MessageSocketRecu[[Position(m_MessageSocketRecu,RC+RC)+4 À ]],encodeURLVersUTF8)
       m_PositionUrl	= Position(m_HeaderReq,"/")
       m_TypeReq		= SansEspace(m_HeaderReq[1 À m_PositionUrl-1])
-      m_UrlRecu		= SansEspace(m_HeaderReq[[m_PositionUrl+1 À Position(m_HeaderReq,"HTTP",m_PositionUrl)-1]])
-      m_PointDentre	= Minuscule( m_UrlRecu[[  À Position(m_UrlRecu,"/")-1 ]])
+      m_UrlRecue		= SansEspace(m_HeaderReq[[m_PositionUrl+1 À Position(m_HeaderReq,"HTTP",m_PositionUrl)-1]])
+      m_PointDentre	= Minuscule( m_UrlRecue[[  À Position(m_UrlRecue,"/")-1 ]])
       
       _GetParam()
      type : 458752
@@ -84,7 +84,7 @@ class :
       
       
       //Récupérer les paramètres passés dans l'URL
-      UrlParametre	est chaine	= m_UrlRecu[[ Position(m_UrlRecu,"?")+1 À]]
+      UrlParametre	est chaine	= m_UrlRecue[[ Position(m_UrlRecue,"?")+1 À]]
       POUR TOUTE CHAÎNE souschaine DE UrlParametre SÉPARÉE PAR "&"
       	L_indicePosition = Position(souschaine,"=")
       	SI L_indicePosition ALORS
@@ -147,8 +147,8 @@ class :
      code : |1+
       procédure publique  GetFile() <métier>
       
-      m_UrlRecu	= Remplace(m_UrlRecu, "/", "\") // Uniformiser les séparateurs Windows
-      m_UrlRecu	= Remplace(m_UrlRecu, "..\", "") // INTERDIRE de remonter d'un dossier
+      m_UrlRecue	= Remplace(m_UrlRecue, "/", "\") // Uniformiser les séparateurs Windows
+      m_UrlRecue	= Remplace(m_UrlRecue, "..\", "") // INTERDIRE de remonter d'un dossier
       
       
       
@@ -156,13 +156,13 @@ class :
       m_CodeReponse = "200 OK"
       
       
-      SI m_UrlRecu = "" ALORS
-      	m_UrlRecu	= "RAAD\index.html"
+      SI m_UrlRecue	 = "" ALORS
+      	m_UrlRecue		= "RAAD\index.html"
       	m_Extension	= ".html"
       SINON
-      	SI Position(m_UrlRecu,"?") > 1 ALORS  m_UrlRecu = m_UrlRecu[ À Position(m_UrlRecu,"?")-1]
-      	m_UrlRecu	= Remplace(m_UrlRecu ,"/","\")
-      	m_Extension	= m_UrlRecu[Position(m_UrlRecu,".",0,DepuisFin) À ]
+      	SI Position(m_UrlRecue,"?") > 1 ALORS  m_UrlRecue = m_UrlRecue[ À Position(m_UrlRecue,"?")-1]
+      	m_UrlRecue	= Remplace(m_UrlRecue ,"/","\")
+      	m_Extension	= m_UrlRecue[Position(m_UrlRecue,".",0,DepuisFin) À ]
       FIN
       
       
@@ -171,11 +171,11 @@ class :
       	selon m_extension
       		cas ".php"
       		
-      		m_ContenuBuffer = ExecuterPhp("D:\Mes Projets\RaaD\Exe\Bin\Php\php-7.4\php-cgi.exe",fRepExe()+["\"]+"WWW\"+m_UrlRecu)
+      		m_ContenuBuffer = ExecuterPhp(m_configuration.LireParametre("Serveur","CheminPhpCgi",""),fRepExe()+["\"]+"WWW\"+m_UrlRecue)
       		
       		
       		AUTRE CAS
-      		m_ContenuBuffer   = fChargeBuffer(fRepExe()+["\"]+"WWW\"+m_UrlRecu)	
+      		m_ContenuBuffer   = fChargeBuffer(fRepExe()+["\"]+"WWW\"+m_UrlRecue)	
       	FIN
       	
       	SI m_ContenuBuffer ="" ALORS 
