@@ -188,13 +188,13 @@ class :
       procédure GetTabRecords() 
       
       LOCAL
-      l_TabEnregistrement		est un tableau de Enregistrements  
+      _TableauEnregistrements		est un tableau de Enregistrements  
       m_ReqSQL est une source de données
       	
       Connexion()
       	
       HExécuteRequêteSQL(m_ReqSQL,m_connexion,hRequêteSansCorrection,"SELECT * FROM WBLignePieces where WBLignePieces.IDwb_piece = 110905")
-      FichierVersTableau(l_TabEnregistrement,m_ReqSQL)
+      FichierVersTableau(_TableauEnregistrements,m_ReqSQL)
       
       
       Déconnexion()

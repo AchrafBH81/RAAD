@@ -23,7 +23,7 @@ class :
       	m_json				est une chaîne
       	m_key				est une chaine
       	m_valkey			est une chaine  
-      	m_Sql				est une chaine  
+      	m_RequeteSQL				est une chaine  
       		
       fin
       
@@ -119,13 +119,13 @@ class :
       	
       
       SI m_valkey <> "" ALORS
-      	m_Sql = ChaîneConstruit("SELECT * FROM %1 where %2" , m_table, m_key + " = " + m_valkey )
+      	m_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 where %2" , m_table, m_key + " = " + m_valkey )
       SINON
-      	m_sql = ChaîneConstruit("SELECT * FROM %1 where %2" , m_table, m_condition ) 
+      	m_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 where %2" , m_table, m_condition ) 
       FIN
       
       m_base.Connexion()
-      HExécuteRequêteSQL(L_ReqSQL,m_base.m_connexion,hRequêteSansCorrection,m_Sql)
+      HExécuteRequêteSQL(L_ReqSQL,m_base.m_connexion,hRequêteSansCorrection,m_RequeteSQL)
       // lire le premier enregistrement  
       HLitPremier(L_ReqSQL)
       FichierVersMémoire(L_ResEnregistrement,L_ReqSQL)
@@ -164,7 +164,7 @@ class :
       	l_corpReq			est une chaîne
       
       l_tabRecord = JSONVersVariant(m_json)
-      m_Sql = "Update" + RC + m_table + rc + "set"
+      m_RequeteSQL = "Update" + RC + m_table + rc + "set"
       
       pour tout l_ligne de l_tabRecord
       	si l_ligne..Nom = m_key ALORS
@@ -176,9 +176,9 @@ class :
       	
       FIN
       
-      m_Sql +=RC + l_corpReq+RC + l_where
+      m_RequeteSQL +=RC + l_corpReq+RC + l_where
       
-      HExécuteRequêteSQL(m_ReqSQL,m_base.m_connexion,hRequêteSansCorrection,m_Sql)
+      HExécuteRequêteSQL(m_ReqSQL,m_base.m_connexion,hRequêteSansCorrection,m_RequeteSQL)
       
       CAS ERREUR:
       m_base.Déconnexion()

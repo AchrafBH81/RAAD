@@ -74,13 +74,13 @@ class :
       				_LireEnregistrement(SocketRecu)
       			cas "POST" : 
       				// Création enregistrement
-      				_CreateRecord(SocketRecu)
+      				_CreerEnregistrement(SocketRecu)
       			cas "PUT"
       				// Modification enregistrement
-      				_UpdateRecord(SocketRecu)
+      				_ModifierEnregistrement(SocketRecu)
       			cas "DELETE"
       				// Suppression enregistrement 
-      				_DeleteRecord(SocketRecu)
+      				_SupprimerEnregistrement(SocketRecu)
       			
       		FIN
       		
@@ -268,11 +268,11 @@ class :
       //L_RequeteHttp.m_ContenuBuffer = ChaîneVersJSON(lres)
      type : 458752
    -
-     name : _UpdateRecord
+     name : _ModifierEnregistrement
      procedure_id : 1515318213611328442
      type_code : 12
      code : |1-
-      procédure privée _UpdateRecord(L_RequeteHttp est CLCanalSocket)
+      procédure privée _ModifierEnregistrement(L_RequeteHttp est CLCanalSocket)
       
       L_EnregistrementCourant est un clenregistrement dynamique = allouer un clenregistrement
       L_EnregistrementCourant <= m_Base.m_Table[L_RequeteHttp.m_Parametres["table"]]
@@ -291,11 +291,11 @@ class :
       libérer L_EnregistrementCourant
      type : 458752
    -
-     name : _CreateRecord
+     name : _CreerEnregistrement
      procedure_id : 1521641157040203827
      type_code : 12
      code : |1+
-      procédure privée _CreateRecord(L_RequeteHttp est CLCanalSocket)
+      procédure privée _CreerEnregistrement(L_RequeteHttp est CLCanalSocket)
       
       // Déclaration d'une instance locale au thread.
       // L'utilisation de l'opérateur '<=' effectue une affectation par copie (et non par référence).
@@ -323,11 +323,11 @@ class :
       libérer L_EnregistrementCourant
      type : 458752
    -
-     name : _DeleteRecord
+     name : _SupprimerEnregistrement
      procedure_id : 1522551269196454160
      type_code : 12
      code : |1+
-      procédure privée _DeleteRecord(L_RequeteHttp est CLCanalSocket)
+      procédure privée _SupprimerEnregistrement(L_RequeteHttp est CLCanalSocket)
       
       
       
