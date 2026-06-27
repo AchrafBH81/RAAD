@@ -149,21 +149,21 @@ class :
       procédure publique  LireEnregistrement(L_EnregistrementCourant est clenregistrement )
       
       LOCAL
-      L_ReqSQL est une source de données
+      l_ReqSQL est une source de données
       L_ResEnregistrement est un Enregistrement 
       	
       Connexion()
       
       si L_EnregistrementCourant.m_valkey <> "" ALORS
-      	HExécuteRequêteSQL(L_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_table, L_EnregistrementCourant.m_key + " = " + L_EnregistrementCourant.m_valkey ))
+      	HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_table, L_EnregistrementCourant.m_key + " = " + L_EnregistrementCourant.m_valkey ))
       	
       sinon
-      	HExécuteRequêteSQL(L_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_table, L_EnregistrementCourant.m_condition ))	
+      	HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_table, L_EnregistrementCourant.m_condition ))	
       FIN
       
       // lire le premier enregistrement  
-      HLitPremier(L_ReqSQL)
-      FichierVersMémoire(L_ResEnregistrement,L_ReqSQL)
+      HLitPremier(l_ReqSQL)
+      FichierVersMémoire(L_ResEnregistrement,l_ReqSQL)
       
       Sérialise(L_ResEnregistrement,L_EnregistrementCourant.m_json,psdJSON)
       
@@ -189,12 +189,12 @@ class :
       
       LOCAL
       _TableauEnregistrements		est un tableau de Enregistrements  
-      m_ReqSQL est une source de données
+      l_ReqSQL est une source de données
       	
       Connexion()
       	
-      HExécuteRequêteSQL(m_ReqSQL,m_connexion,hRequêteSansCorrection,"SELECT * FROM WBLignePieces where WBLignePieces.IDwb_piece = 110905")
-      FichierVersTableau(_TableauEnregistrements,m_ReqSQL)
+      HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,"SELECT * FROM WBLignePieces where WBLignePieces.IDwb_piece = 110905")
+      FichierVersTableau(_TableauEnregistrements,l_ReqSQL)
       
       
       Déconnexion()

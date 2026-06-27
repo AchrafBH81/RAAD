@@ -173,7 +173,7 @@ class :
       	selon m_extension
       		cas ".php"
       		
-      		m_ContenuBuffer = ExecuterPhp(m_configuration.LireParametre("Serveur","CheminPhpCgi",""),fRepExe()+["\"]+"WWW\"+m_UrlRecue)
+      		m_ContenuBuffer = Col_raad.ExecuterPhp(m_configuration.LireParametre("Serveur","CheminPhpCgi",""),fRepExe()+["\"]+"WWW\"+m_UrlRecue)
       		
       		
       		AUTRE CAS

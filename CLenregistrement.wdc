@@ -16,13 +16,13 @@ class :
    -
      code : |1+
       CLEnregistrement est une Classe
-      	m_base				est un  CLBase
-      	m_table				est une chaîne
-      	m_condition			est une chaîne 
-      	m_erreur			est une chaîne 
-      	m_json				est une chaîne
-      	m_key				est une chaine
-      	m_valkey			est une chaine  
+      	m_base						est un  CLBase
+      	m_table						est une chaîne
+      	m_condition					est une chaîne 
+      	m_erreur					est une chaîne 
+      	m_json						est une chaîne
+      	m_key						est une chaine
+      	m_valkey					est une chaine  
       	m_RequeteSQL				est une chaine  
       		
       fin
@@ -158,7 +158,7 @@ class :
       
       // convertir le json en variante 
       LOCAL
-      	m_ReqSQL			est une source de données
+      	L_ReqSQL			est une source de données
       	l_tabRecord			est un variant
       	l_where				est une chaîne
       	l_corpReq			est une chaîne
@@ -178,7 +178,7 @@ class :
       
       m_RequeteSQL +=RC + l_corpReq+RC + l_where
       
-      HExécuteRequêteSQL(m_ReqSQL,m_base.m_connexion,hRequêteSansCorrection,m_RequeteSQL)
+      HExécuteRequêteSQL(L_ReqSQL,m_base.m_connexion,hRequêteSansCorrection,m_RequeteSQL)
       
       CAS ERREUR:
       m_base.Déconnexion()
