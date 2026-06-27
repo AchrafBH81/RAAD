@@ -16,25 +16,25 @@ class :
    -
      code : |1+
       CLCanalSocket est une Classe
-      	m_configuration			est CLConfiguration dynamique
-      	m_NomSocket				est chaine 
-      	m_AdresseClient			est chaîne
-      	m_MessageSocketRecu		est chaine 
-      	m_MessageSocketReponse	est chaine 
-      	m_CanalOuvert			est un booléen
+      	m_configuration						est CLConfiguration dynamique
+      	m_NomSocket							est chaine 
+      	m_AdresseClient						est chaîne
+      	m_MessageSocketRecu					est chaine 
+      	m_MessageSocketReponse				est chaine 
+      	m_CanalOuvert						est un booléen
       	
-      	m_UrlRecue			est une chaîne
-      	m_PointDentre			est une chaîne 		
-      	m_CorpsReq				est une chaîne 
-      	m_HeaderReq				est une chaîne 
-      	m_TypeReq				est une chaîne
-      	m_PositionUrl			est un entier
-      	m_extension				est une chaîne 
-      	m_Gzip					est un booléen
-      	m_ContenuBuffer			est un Buffer
-      	m_CodeReponse			est un chaîne
-      	m_Parametres			est un tableau associatif de chaînes
-      	m_RepEXe				est une chaîne
+      	m_UrlRecue							est une chaîne
+      	m_PointDEntree						est une chaîne 		
+      	m_CorpsRequete						est une chaîne 
+      	m_EnteteRequete						est une chaîne 
+      	m_TypeReq							est une chaîne
+      	m_PositionUrl						est un entier
+      	m_extension							est une chaîne 
+      	m_Gzip								est un booléen
+      	m_ContenuBuffer						est un Buffer
+      	m_CodeReponse						est une chaîne
+      	m_Parametres						est un tableau associatif de chaînes
+      	m_RepertoireExecutable				est une chaîne
       	
       		
       		
@@ -46,9 +46,9 @@ class :
      procedure_id : 1891211195790953650
      type_code : 27
      code : |1+
-      procédure Constructeur(a_Clonfiguration est CLConfiguration)
+      procédure Constructeur(a_Configuration est CLConfiguration)
       
-      m_configuration = a_Clonfiguration
+      m_configuration = a_Configuration
       m_CanalOuvert	= vrai
      type : 589824
    -
@@ -60,18 +60,18 @@ class :
       
      type : 655360
    -
-     name : AnalyseReq
+     name : AnalyserRequete
      procedure_id : 1891211195791084722
      type_code : 12
      code : |1+
-      procédure AnalyseReq()
+      procédure AnalyserRequete()
       
-      m_HeaderReq		= Décode(m_MessageSocketRecu[[ À Position(m_MessageSocketRecu,RC+RC)-1]],encodeURLVersUTF8)
-      m_CorpsReq		= Décode(m_MessageSocketRecu[[Position(m_MessageSocketRecu,RC+RC)+4 À ]],encodeURLVersUTF8)
-      m_PositionUrl	= Position(m_HeaderReq,"/")
-      m_TypeReq		= SansEspace(m_HeaderReq[1 À m_PositionUrl-1])
-      m_UrlRecue		= SansEspace(m_HeaderReq[[m_PositionUrl+1 À Position(m_HeaderReq,"HTTP",m_PositionUrl)-1]])
-      m_PointDentre	= Minuscule( m_UrlRecue[[  À Position(m_UrlRecue,"/")-1 ]])
+      m_EnteteRequete		= Décode(m_MessageSocketRecu[[ À Position(m_MessageSocketRecu,RC+RC)-1]],encodeURLVersUTF8)
+      m_CorpsRequete		= Décode(m_MessageSocketRecu[[Position(m_MessageSocketRecu,RC+RC)+4 À ]],encodeURLVersUTF8)
+      m_PositionUrl	= Position(m_EnteteRequete,"/")
+      m_TypeReq		= SansEspace(m_EnteteRequete[1 À m_PositionUrl-1])
+      m_UrlRecue		= SansEspace(m_EnteteRequete[[m_PositionUrl+1 À Position(m_EnteteRequete,"HTTP",m_PositionUrl)-1]])
+      m_PointDEntree	= Minuscule( m_UrlRecue[[  À Position(m_UrlRecue,"/")-1 ]])
       
       _GetParam()
      type : 458752
@@ -96,7 +96,7 @@ class :
       
       
       //Récupérer les paramètres passés dans l'en-tête.
-      POUR TOUTE CHAÎNE souschaine DE m_HeaderReq SÉPARÉE PAR rc
+      POUR TOUTE CHAÎNE souschaine DE m_EnteteRequete SÉPARÉE PAR rc
       	L_indicePosition = Position(souschaine,":")	
       	SI L_indicePosition ALORS
       		m_Parametres[SansEspace(souschaine[[ À L_indicePosition-1]])] = SansEspace(souschaine[[L_indicePosition+1 À ]])	
@@ -104,11 +104,11 @@ class :
       FIN
      type : 458752
    -
-     name : _GenerateHeaderMessage
+     name : _GenererEnteteReponse
      procedure_id : 1891211195791215794
      type_code : 12
      code : |1+
-      procédure privée _GenerateHeaderMessage()<métier> : chaîne
+      procédure privée _GenererEnteteReponse()<métier> : chaîne
       
       //génération de l'en-tête de la réponse HTTP
       l_valeur est une chaîne=[
@@ -120,9 +120,9 @@ class :
       Connection:Keep-Alive
       ]
       
-      l_DateServer est une dateheure = DateHeureLocaleVersUTC(DateHeureSys())
+      l_DateServeur est une dateheure = DateHeureLocaleVersUTC(DateHeureSys())
       
-      l_valeur = ChaîneConstruit(l_valeur,m_CodeReponse,Taille(m_ContenuBuffer), DateVersChaîne(l_DateServer.PartieDate,"JJ MMM AAAA" )+ " "+HeureVersChaîne(l_DateServer.PartieHeure,"HH:MM:SS")+" GMT")
+      l_valeur = ChaîneConstruit(l_valeur,m_CodeReponse,Taille(m_ContenuBuffer), DateVersChaîne(l_DateServeur.PartieDate,"JJ MMM AAAA" )+ " "+HeureVersChaîne(l_DateServeur.PartieHeure,"HH:MM:SS")+" GMT")
       l_valeur += [RC] + m_configuration.m_TabExtensions[m_Extension]
       
       SI m_Gzip ALORS  l_valeur += [RC] + "Content-Encoding:Gzip"
@@ -132,22 +132,22 @@ class :
       
      type : 458752
    -
-     name : GetReponse
+     name : GenererReponse
      procedure_id : 1891211195791281330
      type_code : 12
      code : |1+
-      procédure GetReponse()
+      procédure GenererReponse()
       
-      m_MessageSocketReponse =  _GenerateHeaderMessage() + RC + RC + m_ContenuBuffer
+      m_MessageSocketReponse =  _GenererEnteteReponse() + RC + RC + m_ContenuBuffer
       
      type : 458752
    -
-     name : GetFile
+     name : ObtenirFichier
      internal_properties : BQAAAAUAAAD36zHHNzqf1YsqeKhuAost9QyLwtABFfotENHsY2gZ1tIU31foK+W8B+1m+nSsxbHfm/GkZcbbPfhdiIe+tbDcWiNV06NQpF7AYcpRx8WSEW3D21cMjgb70UHvmaq+VJnA8JlXt5UwyTVd2ci9xpX8Trv96APNobyVszOFLo7Ane9K+sJcAL0SB11kzofqtIhi5g==
      procedure_id : 1891211195791346866
      type_code : 12
      code : |1+
-      procédure publique  GetFile() <métier>
+      procédure publique  ObtenirFichier() <métier>
       
       m_UrlRecue	= Remplace(m_UrlRecue, "/", "\") // Uniformiser les séparateurs Windows
       m_UrlRecue	= Remplace(m_UrlRecue, "..\", "") // INTERDIRE de remonter d'un dossier

@@ -20,7 +20,7 @@ class :
       	m_RepProjects				est une chaîne		
       	m_RepLog					est une chaîne
       	m_RepConf					est une chaine      
-      	m_RepExe					est une chaîne 
+      	m_RepertoireExecutable					est une chaîne 
       	m_RepSys					est une chaîne
       
       fin
@@ -51,11 +51,11 @@ class :
       procédure privée _InitialiserStructure()
       
       // Création des répertoires 
-      m_RepExe		= fRepExe()+["\"]
-      m_RepProjects	= m_RepExe+"Projects"	
-      m_RepLog		= m_RepExe+"Logs"
-      m_RepConf		= m_RepExe+"Conf"
-      m_RepSys		= m_RepExe+"Systeme"
+      m_RepertoireExecutable		= fRepExe()+["\"]
+      m_RepProjects	= m_RepertoireExecutable+"Projects"	
+      m_RepLog		= m_RepertoireExecutable+"Logs"
+      m_RepConf		= m_RepertoireExecutable+"Conf"
+      m_RepSys		= m_RepertoireExecutable+"Systeme"
       
        
       SI PAS fRépertoireExiste(m_RepProjects) ALORS fRepCrée(m_RepProjects)
@@ -450,7 +450,7 @@ class :
       -
         code : |1+
          procédure publique P_RepExe()
-         renvoyer m_RepExe
+         renvoyer m_RepertoireExecutable
         type : 1966080
       -
         code : |1-

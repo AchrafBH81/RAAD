@@ -19,7 +19,7 @@ class :
       PRIVÉ
       	m_tabVHosts		est un tableau associatif de chaînes
       	m_FichierConf	est une chaîne
-      	m_log			est CLjournalisation dynamique
+      	m_journal			est CLjournalisation dynamique
       FIN
       
      type : 131072
@@ -51,10 +51,10 @@ class :
       //-------------------------------------------------------------------------
       procédure publique Initialisation(LOCAL a_FichierConf est une chaîne, LOCAL a_log est CLjournalisation dynamique)
       m_FichierConf	= a_FichierConf
-      m_log			= a_log
+      m_journal			= a_log
       
       SI PAS fFichierExiste(m_FichierConf) ALORS
-      	m_log.LogErreur("Fichier VHost introuvable, création par défaut : " + m_FichierConf)
+      	m_journal.LogErreur("Fichier VHost introuvable, création par défaut : " + m_FichierConf)
       	fSauveTexte(m_FichierConf, "[Hosts]" + RC + "localhost=RaaD_System")
       FIN
       

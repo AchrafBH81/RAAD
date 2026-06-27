@@ -112,8 +112,8 @@ class :
       m_condition	= a_condition
       
       LOCAL
-      	m_ReqSQL			est une source de données
-      	m_ResEnregistrement	est un Enregistrement 
+      	L_ReqSQL			est une source de données
+      	L_ResEnregistrement	est un Enregistrement 
       	
       
       SI m_valkey <> "" ALORS
@@ -123,14 +123,14 @@ class :
       FIN
       
       m_base.Connexion()
-      HExécuteRequêteSQL(m_ReqSQL,m_base.m_connexion,hRequêteSansCorrection,m_Sql)
+      HExécuteRequêteSQL(L_ReqSQL,m_base.m_connexion,hRequêteSansCorrection,m_Sql)
       // lire le premier enregistrement  
-      HLitPremier(m_ReqSQL)
-      FichierVersMémoire(m_ResEnregistrement,m_ReqSQL)
-      HAnnuleDéclaration(m_ReqSQL)
+      HLitPremier(L_ReqSQL)
+      FichierVersMémoire(L_ResEnregistrement,L_ReqSQL)
+      HAnnuleDéclaration(L_ReqSQL)
       
       //Sérialisation de l’enregistrement 
-      Sérialise(m_ResEnregistrement,m_json,psdJSON)
+      Sérialise(L_ResEnregistrement,m_json,psdJSON)
       
       
       CAS ERREUR:

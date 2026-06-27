@@ -19,7 +19,7 @@ class :
       
       PRIVÉ
       	m_sNomDeFichier		est une chaîne
-      	m_log				est CLjournalisation dynamique
+      	m_journal				est CLjournalisation dynamique
       	
       
       	
@@ -56,7 +56,7 @@ class :
       m_Parametres = tabNouvelleConf // En WinDev, ceci copie le contenu du tableau
       
       
-      m_log.LogErreur("Configuration rechargée à chaud avec succès.")
+      m_journal.LogErreur("Configuration rechargée à chaud avec succès.")
      type : 458752
    -
      name : Constructeur
@@ -81,7 +81,7 @@ class :
      code : |1+
       procédure publique Initialisation(LOCAL a_nomFichier est une chaîne, LOCAL a_log est CLjournalisation dynamique)
       m_sNomDeFichier	= a_nomFichier
-      m_log			= a_log
+      m_journal			= a_log
       
       // 1. Initialisation des données "Dures" (Statiques)
       _InitTableauxStatiques()
@@ -142,7 +142,7 @@ class :
       
       procédure privée _ParserFichierConf(tabCible est un tableau associatif de chaînes)
       SI PAS fFichierExiste(m_sNomDeFichier) ALORS
-      	m_log.LogErreur("Fichier de configuration introuvable : " + m_sNomDeFichier)
+      	m_journal.LogErreur("Fichier de configuration introuvable : " + m_sNomDeFichier)
       	RETOUR
       FIN
       

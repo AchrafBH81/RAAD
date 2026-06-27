@@ -18,10 +18,10 @@ class :
       CLServeurSocket est une Classe
       	m_Proc_CallBack			est une procédure
       Prive
-      	m_CLconfiguration   est CLConfiguration dynamique
+      	m_configuration   est CLConfiguration dynamique
       	m_PortSocket		est un entier	= 5010
       	m_NomSocketEcoute	est une chaine
-      	m_sNomCanal			est une chaîne
+      	m_NomCanal			est une chaîne
       	m_CheminPhpCgi      est une chaîne
       fin
      type : 131072
@@ -55,12 +55,12 @@ class :
       	
       	// Nouvelle demande de connexion
       	// Dans cet exemple, on accepte les connexions
-      	m_sNomCanal = SocketAccepte(m_NomSocketEcoute)
+      	m_NomCanal = SocketAccepte(m_NomSocketEcoute)
       	
       	// Vérification de l'opération d'acceptation
       	// On lance un thread pour gérer cette connexion
       	//sNomThread = sNomCanal
-      	SI m_sNomCanal<>"" ALORS GestionConnexion(m_sNomCanal)
+      	SI m_NomCanal<>"" ALORS GestionConnexion(m_NomCanal)
       		
       FIN	
      type : 458752
@@ -81,7 +81,7 @@ class :
       
       SectionCritiqueDébut(sNomConnexion)
       
-      l_CanalSocket est un CLCanalSocket dynamique = new CLCanalSocket(m_CLconfiguration)
+      l_CanalSocket est un CLCanalSocket dynamique = new CLCanalSocket(m_configuration)
       
       
       
@@ -154,7 +154,7 @@ class :
       procédure privée _LancerServeurHttpsEntrantAsync()
       
       
-      LancerServeurHttpsEntrantAsync(443,8080,m_CLconfiguration.m_CheminCertSSL,m_CLconfiguration.m_CheminCleSSL)
+      LancerServeurHttpsEntrantAsync(443,8080,m_configuration.m_CheminCertSSL,m_configuration.m_CheminCleSSL)
      type : 458752
   properties :
    -
@@ -215,7 +215,7 @@ class :
         code : |1-
          procédure publique P_CLconfiguration(Valeur est CLConfiguration)
          
-         m_CLconfiguration=Valeur
+         m_configuration=Valeur
         type : 2031616
      template_refs : []
   procedure_templates : []

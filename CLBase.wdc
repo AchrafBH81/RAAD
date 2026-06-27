@@ -19,7 +19,7 @@ class :
       	
       	m_connexion					est une connexion
       	m_Configuration				est clConfiguration dynamique 
-      	m_log						est CLjournalisation dynamique 
+      	m_journal						est CLjournalisation dynamique 
       	m_Table						est un tableau associatif de dynamique clenregistrement
       fin
      type : 131072
@@ -48,7 +48,7 @@ class :
       procédure Connexion()
       
       si pas HOuvreConnexion(m_connexion) ALORS
-      	m_log.LogErreur("impossible de se connecter au serveur de base de données")
+      	m_journal.LogErreur("impossible de se connecter au serveur de base de données")
       	renvoyer faux
       FIN
       
@@ -78,7 +78,7 @@ class :
       procédure Initialisation(LOCAL A_fichierini est CLConfiguration dynamique , local A_log  est CLjournalisation dynamique)
       
       m_Configuration	= A_fichierini
-      m_log			=  A_log
+      m_journal			=  A_log
       
       local
       	l_NomTable est chaine 
@@ -124,57 +124,57 @@ class :
      type_code : 12
      code : |1-
       
-      procédure ExecuteSql(local a_CodeSql)
+      procédure ExecuteSQL(local a_CodeSql)
       Local 
       	l_res		est un tableau de Enregistrement
-      	l_HttpReqSQL		est une source de données                         	
+      	L_RequeteHttpSQL		est une source de données                         	
       	
       	
       Connexion()
       
-      HExécuteRequêteSQL(l_HttpReqSQL,m_connexion,hRequêteSansCorrection,a_CodeSql)
+      HExécuteRequêteSQL(L_RequeteHttpSQL,m_connexion,hRequêteSansCorrection,a_CodeSql)
       
       // Sérialisation de l'élément
-      FichierVersTableau(l_res,l_HttpReqSQL)
+      FichierVersTableau(l_res,L_RequeteHttpSQL)
       
       Déconnexion()
       
       renvoyer l_res
      type : 458752
    -
-     name : GetRecord
+     name : LireEnregistrement
      procedure_id : 1473768064283517472
      type_code : 12
      code : |1+
-      procédure publique  GetRecord(l_record est clenregistrement )
+      procédure publique  LireEnregistrement(L_EnregistrementCourant est clenregistrement )
       
       LOCAL
-      m_ReqSQL est une source de données
-      m_ResEnregistrement est un Enregistrement 
+      L_ReqSQL est une source de données
+      L_ResEnregistrement est un Enregistrement 
       	
       Connexion()
       
-      si l_record.m_valkey <> "" ALORS
-      	HExécuteRequêteSQL(m_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , l_record.m_table, l_record.m_key + " = " + l_record.m_valkey ))
+      si L_EnregistrementCourant.m_valkey <> "" ALORS
+      	HExécuteRequêteSQL(L_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_table, L_EnregistrementCourant.m_key + " = " + L_EnregistrementCourant.m_valkey ))
       	
       sinon
-      	HExécuteRequêteSQL(m_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , l_record.m_table, l_record.m_condition ))	
+      	HExécuteRequêteSQL(L_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_table, L_EnregistrementCourant.m_condition ))	
       FIN
       
       // lire le premier enregistrement  
-      HLitPremier(m_ReqSQL)
-      FichierVersMémoire(m_ResEnregistrement,m_ReqSQL)
+      HLitPremier(L_ReqSQL)
+      FichierVersMémoire(L_ResEnregistrement,L_ReqSQL)
       
-      Sérialise(m_ResEnregistrement,l_record.m_json,psdJSON)
+      Sérialise(L_ResEnregistrement,L_EnregistrementCourant.m_json,psdJSON)
       
       
       
       CAS ERREUR:
-      l_record.m_erreur = ErreurInfo()
+      L_EnregistrementCourant.m_erreur = ErreurInfo()
       
       
       CAS EXCEPTION:
-      l_record.m_erreur = ExceptionInfo()
+      L_EnregistrementCourant.m_erreur = ExceptionInfo()
       
       
       fin :
