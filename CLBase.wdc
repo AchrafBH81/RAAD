@@ -17,10 +17,10 @@ class :
      code : |1+
       CLBase est une Classe
       	
-      	m_connexion					est une connexion
-      	m_Configuration				est clConfiguration dynamique 
+      	m_connexion						est une connexion
+      	m_Configuration					est clConfiguration dynamique 
       	m_journal						est CLjournalisation dynamique 
-      	m_Table						est un tableau associatif de dynamique clenregistrement
+      	m_Table							est un tableau associatif de dynamique clenregistrement
       fin
      type : 131072
   procedures :

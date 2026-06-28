@@ -128,7 +128,8 @@ class :
       // =========================================================================
       // On encapsule l'appel dans un ThreadExécute pour que la boucle infinie 
       // du code C# ne bloque pas le démarrage du serveur WLangage.
-      ThreadExécute("Thread_Proxy_HTTPS", threadNormal, _LancerServeurHttpsEntrantAsync)
+      ThreadExécute("Thread_Proxy_HTTPS", threadNormal,_LancerServeurHttpsEntrantAsync)
+      
       
       
       SI ErreurDétectée ALORS
@@ -155,7 +156,16 @@ class :
       procédure privée _LancerServeurHttpsEntrantAsync()
       
       
-      COL_RAAD.LancerServeurHttpsEntrantAsync(443,8080,m_configuration.m_CheminCertSSL,m_configuration.m_CheminCleSSL)
+      QUAND EXCEPTION DANS
+      	
+      	// Appel de l'assemblage C# : On transmet les Buffers (byte[]) au lieu des chaînes (string)
+      	COL_RAAD.LancerServeurHttpsEntrantAsync(443, 8080, m_configuration.m_CheminCertSSL, m_configuration.m_CheminCleSSL)
+      	
+      FAIRE
+      	// Gestion silencieuse : on ne bloque jamais le thread avec une fenêtre Erreur()
+      	// TODO: Tracer l'exception dans le fichier log
+      	RETOUR
+      FIN
      type : 458752
   properties :
    -
