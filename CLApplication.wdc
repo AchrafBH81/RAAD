@@ -215,6 +215,9 @@ class :
      code : |1+
       procédure privée _GetMemory(L_RequeteHttp est CLCanalSocket) <métier>
       
+      
+      
+      
      type : 458752
    -
      name : _ObtenirFichier
