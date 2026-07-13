@@ -209,18 +209,37 @@ class :
      procedure_id : 1478157130026548149
      type_code : 12
      code : |1-
-      procédure privée _ObtenirFichier(L_RequeteHttp est CLCanalSocket)<métier>
+      procédure privée _ObtenirFichier(a_RequeteHttp est CLCanalSocket)<métier>
       
-      L_RequeteHttp.ObtenirFichier()
+      a_RequeteHttp.ObtenirFichier()
      type : 458752
    -
      name : _LireEnregistrements
      procedure_id : 1478385377465361484
      type_code : 12
      code : |1-
-      procédure privée _LireEnregistrements(L_RequeteHttp est CLCanalSocket)
+      procédure privée _LireEnregistrements(a_SocketRecu est CLCanalSocket)
       
+      // 1. Instanciation dynamique et indépendante (Thread-Safe)
+      l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
+      l_EnregistrementCourant <= m_Base.m_Table[a_SocketRecu.m_Parametres["table"]]
       
+      // 2. Appel de la méthode métier en passant les filtres de l'URL
+      // S'il n'y a pas de filtres, m_Parametres renvoie "" (chaîne vide)
+      l_EnregistrementCourant.ChargerCollection(a_SocketRecu.m_Parametres["rubrique"], a_SocketRecu.m_Parametres["valeur"])
+      
+      // 3. Traitement de la réponse de l'ORM
+      SI l_EnregistrementCourant.m_erreur <> "" ALORS
+      	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
+      	a_SocketRecu.m_ContenuBuffer	= l_EnregistrementCourant.m_erreur
+      SINON
+      	a_SocketRecu.m_CodeReponse		= "200 OK"
+      	// m_json contiendra désormais un tableau JSON (ex: "[{...}, {...}]")
+      	a_SocketRecu.m_ContenuBuffer	= l_EnregistrementCourant.m_json
+      FIN
+      
+      // 4. Libération mémoire indispensable
+      libérer l_EnregistrementCourant
       
       
       
@@ -314,11 +333,36 @@ class :
      name : _SupprimerEnregistrement
      procedure_id : 1522551269196454160
      type_code : 12
-     code : |1+
-      procédure privée _SupprimerEnregistrement(L_RequeteHttp est CLCanalSocket)
+     code : |1-
+      procédure privée _SupprimerEnregistrement(a_SocketRecu est CLCanalSocket)
       
       
       
+      // 1. Instanciation dynamique et indépendante (Règle Thread-Safe)
+      l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
+      l_EnregistrementCourant <= m_Base.m_Table[a_SocketRecu.m_Parametres["table"]]
+      
+      // 2. Aiguillage selon le type de suppression (Unitaire ou Masse)
+      SI a_SocketRecu.m_Parametres["valkey"] <> "" ALORS
+      	// Suppression unitaire par Clé Unique / Identifiant
+      	l_EnregistrementCourant.SupprimerUnitaire(a_SocketRecu.m_Parametres["valkey"])
+      SINON
+      	// Suppression en masse par rubrique + condition
+      	l_EnregistrementCourant.SupprimerCollection(a_SocketRecu.m_Parametres["rubrique"], a_SocketRecu.m_Parametres["valeur"])
+      FIN
+      
+      // 3. Analyse du retour de l'ORM et construction de la réponse HTTP
+      SI l_EnregistrementCourant.m_erreur <> "" ALORS
+      	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
+      	a_SocketRecu.m_ContenuBuffer	= l_EnregistrementCourant.m_erreur
+      SINON
+      	// En REST standard, un DELETE réussi renvoie un code 200 avec confirmation ou 204 No Content
+      	a_SocketRecu.m_CodeReponse		= "200 OK"
+      	a_SocketRecu.m_ContenuBuffer	= "{""statut"": ""Succès"", ""message"": ""Suppression effectuée avec succès.""}"
+      FIN
+      
+      // 4. Libération mémoire obligatoire (Anti Race-Condition)
+      libérer l_EnregistrementCourant
      type : 458752
    -
      name : arret

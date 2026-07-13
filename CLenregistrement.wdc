@@ -264,6 +264,178 @@ class :
       
       renvoyer NouvelEnregistrement
      type : 458752
+   -
+     name : ChargerCollection
+     procedure_id : 1897198161154489649
+     type_code : 12
+     code : |1+
+      PROCEDURE ChargerCollection(a_RubriqueFiltre est une chaîne = "", a_ValeurFiltre est une chaîne = "")
+      
+      LOCAL
+      	l_SourceDonnees	est une Source de Données
+      	l_RequeteSQL	est une chaîne
+      	l_TableauJson	est une chaîne	= "["
+      	l_Premier		est un booléen	= Vrai
+      	
+      // 1. Construction sécurisée de la requête SQL
+      SI a_RubriqueFiltre <> "" ET a_ValeurFiltre <> "" ALORS
+      	// Échappement basique anti-injection (WinDev 25)
+      	a_ValeurFiltre	= Remplace(a_ValeurFiltre, "'", "''") 
+      	
+      	l_RequeteSQL	= ChaîneConstruit("SELECT * FROM %1 WHERE %2 = '%3'", ...
+      	m_Table, a_RubriqueFiltre, a_ValeurFiltre)
+      SINON
+      	// Aucun filtre, on sélectionne tout
+      	l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1", m_Table)
+      FIN
+      
+      // 2. Exécution dans le contexte HFSQL du thread courant
+      SI HExécuteRequêteSQL(l_SourceDonnees, hRequêteDéfaut, l_RequeteSQL) ALORS
+      	
+      	// 3. Parcours des résultats pour construire le tableau JSON
+      	POUR TOUT l_SourceDonnees
+      		SI PAS l_Premier ALORS l_TableauJson += ","
+      		
+      		// ICI : Appel de ta méthode interne qui convertit l'enregistrement courant en JSON
+      		l_TableauJson += _GenererJsonDepuisSource(l_SourceDonnees)
+      		
+      		l_Premier = Faux
+      	FIN
+      	
+      	l_TableauJson += "]"
+      	
+      	// 4. Affectation du résultat aux propriétés de l'objet
+      	
+      	m_json		= l_TableauJson
+      	m_erreur	= ""
+      	
+      SINON
+      	// Récupération formatée de l'erreur HFSQL
+      	m_erreur = "{""erreur"": ""Erreur SQL : " + HErreurInfo() + """}"
+      FIN
+      
+      HAnnuleDéclaration(l_SourceDonnees)
+      
+     type : 458752
+   -
+     name : _GenererJsonDepuisSource
+     procedure_id : 1897208443306296295
+     type_code : 12
+     code : |1+
+      PROCEDURE PRIVÉE _GenererJsonDepuisSource(a_SourceDonnees est une Source de Données)
+      
+      LOCAL
+      	l_ListeRubriques	est une chaîne
+      	l_NomRubrique		est une chaîne
+      	l_ValeurBrute		est une chaîne
+      	l_JsonGenere		est une chaîne	= "{"
+      	l_Premier			est un booléen	= Vrai
+      	
+      	// =================================================================================
+      	// 1. INTROSPECTION DE LA STRUCTURE DE DONNÉES
+      	// HListeRubrique renvoie les noms de toutes les colonnes de la requête, 
+      	// séparés par des retours chariot (RC).
+      // =================================================================================
+      l_ListeRubriques = HListeRubrique(a_SourceDonnees)
+      
+      // =================================================================================
+      // 2. PARCOURS DYNAMIQUE ET SÉRIALISATION
+      // =================================================================================
+      POUR TOUTE CHAINE l_NomRubrique DE l_ListeRubriques SEPAREE PAR RC
+      	
+      	// Sécurité : ignorer les lignes vides éventuelles
+      	SI l_NomRubrique = "" ALORS CONTINUER
+      	
+      	SI PAS l_Premier ALORS 
+      		l_JsonGenere += ", "
+      	FIN
+      	
+      	// ---------------------------------------------------------
+      	// Lecture par Indirection WLangage
+      	// L'utilisation des crochets permet d'extraire la valeur 
+      	// physique sans connaître la table à l'avance.
+      	// ---------------------------------------------------------
+      	l_ValeurBrute = {a_SourceDonnees..Nom + "." + l_NomRubrique, indRubrique}	
+      	// ---------------------------------------------------------
+      	// Sécurisation stricte du format JSON (Échappement)
+      	// Sans cela, un guillemet dans un nom de client casserait ton API.
+      	// ---------------------------------------------------------
+      	l_ValeurBrute	= Remplace(l_ValeurBrute, "\", "\\")   // Sécuriser l'antislash d'abord
+      	l_ValeurBrute	= Remplace(l_ValeurBrute, """", "\""") // Sécuriser les guillemets
+      	l_ValeurBrute	= Remplace(l_ValeurBrute, RC, "\n")    // Gérer les sauts de ligne multi-OS
+      	l_ValeurBrute	= Remplace(l_ValeurBrute, TAB, "\t")   // Gérer les tabulations
+      	
+      	// ---------------------------------------------------------
+      	// Construction de la paire "Clé": "Valeur"
+      	// Choix architectural : Pour simplifier cette version manuelle, 
+      	// toutes les valeurs sont castées en chaîne ("valeur").
+      	// ---------------------------------------------------------
+      	l_JsonGenere += ChaîneConstruit("""%1"": ""%2""", l_NomRubrique, l_ValeurBrute)
+      	
+      	l_Premier = Faux
+      FIN
+      
+      l_JsonGenere += "}"
+      
+      // =================================================================================
+      // 3. RETOUR DE L'OBJET JSON
+      // =================================================================================
+      renvoyer l_JsonGenere
+     type : 458752
+   -
+     name : SupprimerUnitaire
+     procedure_id : 1897212175633155679
+     type_code : 12
+     code : |1+
+      PROCEDURE SupprimerUnitaire(a_ValeurCleUnique est une chaîne)
+      
+      // 1. Recherche de l'enregistrement en base de données
+      // m_NomTable contient le nom de la table, m_CleUnique contient le nom de la clé primaire
+      SI HLitRecherchePremier(m_Table, m_key, a_ValeurCleUnique) ALORS
+      	
+      	// 2. Suppression physique
+      	SI HSupprime(m_table) ALORS
+      		m_erreur = ""
+      	SINON
+      		m_erreur = "{""erreur"": ""Impossible de supprimer l'enregistrement : " + HErreurInfo(hErrMessage) + """}"
+      	FIN
+      SINON
+      	m_erreur = "{""erreur"": ""Enregistrement introuvable avec la clé spécifiée.""}"
+      FIN
+      
+     type : 458752
+   -
+     name : SupprimerCollection
+     procedure_id : 1897212283007428771
+     type_code : 12
+     code : |1+
+      PROCEDURE SupprimerCollection(a_RubriqueFiltre est une chaîne, a_ValeurFiltre est une chaîne)
+      
+      LOCAL
+      	l_RequeteSQL est une chaîne
+      	
+      // 1. Validation de sécurité : les filtres doivent être fournis pour éviter un DELETE global accidentel !
+      SI a_RubriqueFiltre = "" OU a_ValeurFiltre = "" ALORS
+      	m_erreur = "{""erreur"": ""Les paramètres 'rubrique' et 'valeur' sont obligatoires pour une suppression en masse.""}"
+      	RETOUR
+      FIN
+      
+      // 2. Sécurisation anti-injection SQL sur la valeur (Échappement WinDev 25)
+      a_ValeurFiltre	= Remplace(a_ValeurFiltre, "'", "''")
+      
+      // 3. Construction de la requête de suppression en masse
+      l_RequeteSQL	= ChaîneConstruit("DELETE FROM %1 WHERE %2 = '%3'", ...
+      m_Table, a_RubriqueFiltre, a_ValeurFiltre)
+      
+      // 4. Exécution directe de la requête de modification/suppression
+      // En WinDev 25, HExécuteRequêteSQL sans Source de Données exécute l'ordre directement en C/S
+      SI PAS HExécuteRequêteSQL(l_RequeteSQL) ALORS
+      	m_erreur = "{""erreur"": ""Échec de la suppression en masse : " + HErreurInfo(hErrMessage) + """}"
+      SINON
+      	m_erreur = ""
+      FIN
+      
+     type : 458752
   procedure_templates : []
   property_templates : []
  code_parameters :
