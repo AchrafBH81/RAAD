@@ -59,51 +59,36 @@ class :
      type_code : 12
      code : |1+
       
-      procédure MessageRecu(SocketRecu est CLCanalSocket) 
+      procédure MessageRecu(a_SocketRecu est CLCanalSocket) 
       
-      SocketRecu.AnalyserRequete()
+      // 1. Décodage et parsing initial de la requête HTTP
+      a_SocketRecu.AnalyserRequete()
       
-      selon SocketRecu.m_PointDEntree
+      LOCAL
+      	l_UriDemande est une chaîne = a_SocketRecu.m_UrlRecue
       	
-      	cas "record" : 
-      		
-      		selon SocketRecu.m_TypeReq
-      			
-      			cas "GET" : 
-      				// Lecture enregistrement
-      				_LireEnregistrement(SocketRecu)
-      			cas "POST" : 
-      				// Création enregistrement
-      				_CreerEnregistrement(SocketRecu)
-      			cas "PUT"
-      				// Modification enregistrement
-      				_ModifierEnregistrement(SocketRecu)
-      			cas "DELETE"
-      				// Suppression enregistrement 
-      				_SupprimerEnregistrement(SocketRecu)
-      			
-      		FIN
-      		
-      	CAS "records" :
-      		
-      		_LireEnregistrements(SocketRecu)
-      		
-      	cas "sql" : 
-      		_ExecuterRequeteSQL(SocketRecu)
-      		
-      	cas "memoire"
-      		
-      		_GetMemory(SocketRecu)
-      		
-      	AUTRE CAS : 
-      		_ObtenirFichier(SocketRecu)
-      		
-      		
+      	// =================================================================================
+      	// AIGUILLAGE PRINCIPAL : API VS FICHIERS STATIQUES (Rétrocompatibilité WinDev 25)
+      	// =================================================================================
+      	
+      // Vérification O(1) via Position() au lieu du CommencePar() inexistant en V25
+      SI Position(l_UriDemande, "/api/v1/data/", 1, SansCasse) = 1 ALORS
+      	// Délégation complète du traitement de l'API à notre nouvelle méthode dédiée
+      	_TraiterRequeteApi(a_SocketRecu)
+      	
+      SINON SI Position(l_UriDemande, "/api/v1/sql", 1, SansCasse) = 1 ALORS
+      	_ExecuterRequeteSQL(a_SocketRecu)
+      	
+      SINON SI Position(l_UriDemande, "/api/v1/memoire", 1, SansCasse) = 1 ALORS
+      	_GetMemory(a_SocketRecu)
+      	
+      SINON
+      	// Par défaut, traitement des ressources statiques (HTML, CSS, images)
+      	_ObtenirFichier(a_SocketRecu)
       FIN
       
-      
-      
-       SocketRecu.GenererReponse()    
+      // Envoi final de la réponse construite au client TCP
+      a_SocketRecu.GenererReponse()
       
      type : 458752
    -
@@ -343,6 +328,48 @@ class :
       procédure arret()
       
       m_ServeurSocket.arret()
+     type : 458752
+   -
+     name : _TraiterRequeteApi
+     procedure_id : 1897190473160977712
+     type_code : 12
+     code : |1+
+      PROCEDURE PRIVÉE _TraiterRequeteApi(a_SocketRecu est CLCanalSocket)
+      
+      // =================================================================================
+      // 1. EXTRACTION ET INJECTION DIRECTE (Zéro variable locale allouée)
+      // Segments d'URL : 2:"api", 3:"v1", 4:"data", 5:{espace}, 6:{table}, 7:{valkey}
+      // =================================================================================
+      a_SocketRecu.m_Parametres["espace"]	= ExtraitChaîne(a_SocketRecu.m_UrlRecue, 5, "/")
+      a_SocketRecu.m_Parametres["table"]	= ExtraitChaîne(a_SocketRecu.m_UrlRecue, 6, "/")
+      a_SocketRecu.m_Parametres["valkey"]	= ExtraitChaîne(a_SocketRecu.m_UrlRecue, 7, "/")
+      
+      // =================================================================================
+      // 2. CONTRÔLEUR REST (Évaluation directe de l'objet)
+      // =================================================================================
+      SELON a_SocketRecu.m_TypeReq
+      	CAS "GET" :
+      		// On lit directement le paramètre fraîchement assigné
+      		SI a_SocketRecu.m_Parametres["valkey"] = "" ALORS
+      			_LireEnregistrements(a_SocketRecu)
+      		SINON
+      			_LireEnregistrement(a_SocketRecu)
+      		FIN
+      		
+      	CAS "POST" :
+      		_CreerEnregistrement(a_SocketRecu)
+      		
+      	CAS "PUT" :
+      		_ModifierEnregistrement(a_SocketRecu)
+      		
+      	CAS "DELETE" :
+      		_SupprimerEnregistrement(a_SocketRecu)
+      		
+      	AUTRE CAS :
+      		// Protection standardisée si le verbe HTTP n'est pas supporté
+      		a_SocketRecu.m_CodeReponse = "405 Method Not Allowed"
+      FIN
+      
      type : 458752
   procedure_templates : []
   property_templates : []
