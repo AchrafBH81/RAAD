@@ -374,43 +374,66 @@ class :
      name : _TraiterRequeteApi
      procedure_id : 1897190473160977712
      type_code : 12
-     code : |1+
+     code : |1-
       PROCEDURE PRIVÉE _TraiterRequeteApi(a_SocketRecu est CLCanalSocket)
       
       // =================================================================================
       // 1. EXTRACTION ET INJECTION DIRECTE (Zéro variable locale allouée)
       // Segments d'URL : 2:"api", 3:"v1", 4:"data", 5:{espace}, 6:{table}, 7:{valkey}
       // =================================================================================
-      a_SocketRecu.m_Parametres["espace"]	= ExtraitChaîne(a_SocketRecu.m_UrlRecue, 4, "/")
-      a_SocketRecu.m_Parametres["table"]	= ExtraitChaîne(a_SocketRecu.m_UrlRecue, 5, "/")
-      a_SocketRecu.m_Parametres["valkey"]	= ExtraitChaîne(a_SocketRecu.m_UrlRecue, 6, "/")
+      
+      l_CheminPur       est une chaîne
+      
+      SI Position(a_SocketRecu.m_UrlRecue, "?") > 0 ALORS
+      	// Le '?' existe : on extrait strictement ce qui se trouve à sa gauche
+      	l_CheminPur = Gauche(a_SocketRecu.m_UrlRecue, Position(a_SocketRecu.m_UrlRecue, "?") - 1)
+      SINON
+      	// Pas de paramètres : le chemin pur est l'URL complète
+      	l_CheminPur = a_SocketRecu.m_UrlRecue
+      FIN
+      
+      a_SocketRecu.m_Parametres["espace"]	= ExtraitChaîne(l_CheminPur, 4, "/")
+      a_SocketRecu.m_Parametres["table"]	= ExtraitChaîne(l_CheminPur, 5, "/")
+      a_SocketRecu.m_Parametres["valkey"]	= ExtraitChaîne(l_CheminPur, 6, "/")
       
       // =================================================================================
       // 2. CONTRÔLEUR REST (Évaluation directe de l'objet)
       // =================================================================================
-      SELON a_SocketRecu.m_TypeReq
-      	CAS "GET" :
-      		// On lit directement le paramètre fraîchement assigné
-      		SI a_SocketRecu.m_Parametres["valkey"] = "" Ou  a_SocketRecu.m_Parametres["valkey"] = eot ALORS
-      			_LireEnregistrements(a_SocketRecu)
-      		SINON
-      			_LireEnregistrement(a_SocketRecu)
-      		FIN
-      		
-      	CAS "POST" :
-      		_CreerEnregistrement(a_SocketRecu)
-      		
-      	CAS "PUT" :
-      		_ModifierEnregistrement(a_SocketRecu)
-      		
-      	CAS "DELETE" :
-      		_SupprimerEnregistrement(a_SocketRecu)
-      		
-      	AUTRE CAS :
-      		// Protection standardisée si le verbe HTTP n'est pas supporté
-      		a_SocketRecu.m_CodeReponse = "405 Method Not Allowed"
-      FIN
       
+      QUAND EXCEPTION DANS
+      	
+      
+      	SELON a_SocketRecu.m_TypeReq
+      		CAS "GET" :
+      			// On lit directement le paramètre fraîchement assigné
+      			SI a_SocketRecu.m_Parametres["valkey"] = "" Ou  a_SocketRecu.m_Parametres["valkey"] = eot ALORS
+      				_LireEnregistrements(a_SocketRecu)
+      			SINON
+      				_LireEnregistrement(a_SocketRecu)
+      			FIN
+      			
+      		CAS "POST" :
+      			_CreerEnregistrement(a_SocketRecu)
+      			
+      		CAS "PUT" :
+      			_ModifierEnregistrement(a_SocketRecu)
+      			
+      		CAS "DELETE" :
+      			_SupprimerEnregistrement(a_SocketRecu)
+      			
+      		AUTRE CAS :
+      			// Protection standardisée si le verbe HTTP n'est pas supporté
+      			a_SocketRecu.m_CodeReponse = "405 Method Not Allowed"
+      	FIN
+      
+      FAIRE
+      	// Capture silencieuse de l'exception, journalisation et retour propre 500 au client
+      	// Remplace CLLog par ta classe de journalisation si nécessaire
+      
+      	
+      	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
+      	a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Une erreur interne est survenue lors du routage de la requête.""}"
+      FIN
      type : 458752
   procedure_templates : []
   property_templates : []

@@ -272,46 +272,70 @@ class :
       // Ajout du paramètre a_Operateur avec une valeur par défaut vide
       PROCEDURE ChargerCollection(a_RubriqueFiltre est une chaîne = "", a_ValeurFiltre est une chaîne = "", a_Operateur est une chaîne = "")
       
-      LOCAL
-      	l_SourceDonnees		est une Source de Données
-      	l_RequeteSQL		est une chaîne
-      	l_VariantTableau	est un tableau de variants
-      	l_VariantLigne		est un variant
+      // Blindage de l'accès aux données contre les corruptions d'index ou verrous HFSQL
+      QUAND EXCEPTION DANS
       	
-      SI a_RubriqueFiltre <> "" ET a_ValeurFiltre <> "" ALORS
-      	// Échappement basique anti-injection SQL
-      	a_ValeurFiltre = Remplace(a_ValeurFiltre, "'", "''") 
-      	
-      	// Aiguillage selon l'opérateur demandé par le client
-      	SI Minuscule(a_Operateur) = "contient" ALORS
-      		// Construction pour une recherche partielle (LIKE '%valeur%')
-      		// Note: On ajoute les '%' directement autour de la valeur pour éviter 
-      		// les conflits d'échappement avec ChaîneConstruit.
-      		l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 LIKE '%3'", ...
-      		m_Table, a_RubriqueFiltre, "%" + a_ValeurFiltre + "%")
+      	LOCAL
+      		l_SourceDonnees				est une Source de Données
+      		l_RequeteSQL				est une chaîne
+      		l_VariantTableau			est un tableau de variants
+      		l_VariantLigne				est un variant
+      		l_OperateurSql				est une chaîne	= Minuscule(a_Operateur)
+      		l_tableauEnregistrements	est un tableau de Enregistrement
+      		// CONDITIONS ET OPÉRATEURS PRIS EN CHARGE PAR L'API :
+      		// -----------------------------------------------------------------------------------------
+      		// 1. "contient"    -> Recherche partielle floue  (SQL: LIKE '%valeur%')
+      		// 2. "commence"    -> Recherche par le début     (SQL: LIKE 'valeur%')
+      		// 3. "termine"     -> Recherche par la fin       (SQL: LIKE '%valeur')
+      		// 4. "sup"         -> Strictement supérieur      (SQL: > 'valeur')
+      		// 5. "inf"         -> Strictement inférieur      (SQL: < 'valeur')
+      		// 6. [Vide / Autre]-> Égalité stricte par défaut (SQL: = 'valeur')
+      		// -----------------------------------------------------------------------------------------
+      		
+      	SI a_RubriqueFiltre <> "" ET a_ValeurFiltre <> "" ALORS
+      		// Protection essentielle anti-injection SQL sur la valeur cliente
+      		a_ValeurFiltre = Remplace(a_ValeurFiltre, "'", "''") 
+      		
+      		SELON l_OperateurSql
+      			CAS "contient" :
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 LIKE '%3'", m_Table, a_RubriqueFiltre, "%" + a_ValeurFiltre + "%")
+      			CAS "commence" :
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 LIKE '%3'", m_Table, a_RubriqueFiltre, a_ValeurFiltre + "%")
+      			CAS "termine" :
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 LIKE '%3'", m_Table, a_RubriqueFiltre, "%" + a_ValeurFiltre)
+      			CAS "sup" :
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 > '%3'", m_Table, a_RubriqueFiltre, a_ValeurFiltre)
+      			CAS "inf" :
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 < '%3'", m_Table, a_RubriqueFiltre, a_ValeurFiltre)
+      			AUTRE CAS :
+      				// Égalité stricte par défaut
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 = '%3'", m_table, a_RubriqueFiltre, a_ValeurFiltre)
+      		FIN
       	SINON
-      		// Construction par défaut pour une recherche exacte (= 'valeur')
-      		l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 = '%3'", ...
-      		m_table, a_RubriqueFiltre, a_ValeurFiltre)
+      		// Aucun filtre, extraction complète de la ressource
+      		l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1", m_Table)
       	FIN
-      SINON
-      	// Aucun filtre
-      	l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1", m_table)
-      FIN
-      
-      // Exécution et sérialisation dynamique (inchangé)
-      SI HExécuteRequêteSQL(l_SourceDonnees, hRequêteDéfaut, l_RequeteSQL) ALORS
-      	POUR TOUT l_SourceDonnees
-      		l_VariantLigne = l_SourceDonnees
-      		TableauAjoute(l_VariantTableau, l_VariantLigne)
+      	
+      	// Exécution SQL dans l'isolation du thread courant
+      	SI HExécuteRequêteSQL(l_SourceDonnees, hRequêteDéfaut, l_RequeteSQL) ALORS
+      //		POUR TOUT l_SourceDonnees
+      //			l_VariantLigne = l_SourceDonnees
+      //			TableauAjoute(l_VariantTableau, l_VariantLigne)
+      //		FIN
+      //		m_json		= VariantVersJSON(l_VariantTableau)
+      		FichierVersTableau(l_tableauEnregistrements,l_SourceDonnees)
+      		Sérialise(l_tableauEnregistrements,m_json,psdJSON)
+      		m_erreur	= ""
+      	SINON
+      		m_erreur = "{""erreur"": ""Erreur d'exécution HFSQL : " + Remplace(HErreurInfo(hErrMessage), """", "\""") + """}"
       	FIN
-      	m_json		= VariantVersJSON(l_VariantTableau)
-      	m_erreur	= ""
-      SINON
-      	m_erreur = "{""erreur"": ""Erreur SQL : " + HErreurInfo() + """}"
+      	
+      	HAnnuleDéclaration(l_SourceDonnees)
+      	
+      FAIRE
+      	// Capture des ruptures de connexions ou crashs d'indirection
+      	m_erreur = "{""erreur"": ""Le moteur de données a rencontré une exception fatale.""}"
       FIN
-      
-      HAnnuleDéclaration(l_SourceDonnees)
      type : 458752
    -
      name : _GenererJsonDepuisSource
