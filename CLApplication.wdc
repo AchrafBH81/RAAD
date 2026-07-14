@@ -220,27 +220,24 @@ class :
      code : |1-
       procédure privée _LireEnregistrements(a_SocketRecu est CLCanalSocket)
       
-      // 1. Instanciation dynamique et indépendante (Thread-Safe)
       l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
       l_EnregistrementCourant <= m_Base.m_Table[a_SocketRecu.m_Parametres["table"]]
       
-      // 2. Appel de la méthode métier en passant les filtres de l'URL
-      // S'il n'y a pas de filtres, m_Parametres renvoie "" (chaîne vide)
-      l_EnregistrementCourant.ChargerCollection(a_SocketRecu.m_Parametres["rubrique"], a_SocketRecu.m_Parametres["valeur"])
+      // On passe un 3ème paramètre : l'opérateur extrait de l'URL
+      l_EnregistrementCourant.ChargerCollection(...
+      a_SocketRecu.m_Parametres["rubrique"], ...
+      a_SocketRecu.m_Parametres["valeur"], ...
+      a_SocketRecu.m_Parametres["operateur"])
       
-      // 3. Traitement de la réponse de l'ORM
       SI l_EnregistrementCourant.m_erreur <> "" ALORS
       	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
       	a_SocketRecu.m_ContenuBuffer	= l_EnregistrementCourant.m_erreur
       SINON
       	a_SocketRecu.m_CodeReponse		= "200 OK"
-      	// m_json contiendra désormais un tableau JSON (ex: "[{...}, {...}]")
       	a_SocketRecu.m_ContenuBuffer	= l_EnregistrementCourant.m_json
       FIN
       
-      // 4. Libération mémoire indispensable
       libérer l_EnregistrementCourant
-      
       
       
       //l_resjson = L_RequeteHttp.m_ContenuBuffer

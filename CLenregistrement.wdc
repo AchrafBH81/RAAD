@@ -268,54 +268,50 @@ class :
      name : ChargerCollection
      procedure_id : 1897198161154489649
      type_code : 12
-     code : |1+
-      PROCEDURE ChargerCollection(a_RubriqueFiltre est une chaîne = "", a_ValeurFiltre est une chaîne = "")
+     code : |1-
+      // Ajout du paramètre a_Operateur avec une valeur par défaut vide
+      PROCEDURE ChargerCollection(a_RubriqueFiltre est une chaîne = "", a_ValeurFiltre est une chaîne = "", a_Operateur est une chaîne = "")
       
       LOCAL
-      	l_SourceDonnees	est une Source de Données
-      	l_RequeteSQL	est une chaîne
-      	l_TableauJson	est une chaîne	= "["
-      	l_Premier		est un booléen	= Vrai
+      	l_SourceDonnees		est une Source de Données
+      	l_RequeteSQL		est une chaîne
+      	l_VariantTableau	est un tableau de variants
+      	l_VariantLigne		est un variant
       	
-      // 1. Construction sécurisée de la requête SQL
       SI a_RubriqueFiltre <> "" ET a_ValeurFiltre <> "" ALORS
-      	// Échappement basique anti-injection (WinDev 25)
-      	a_ValeurFiltre	= Remplace(a_ValeurFiltre, "'", "''") 
+      	// Échappement basique anti-injection SQL
+      	a_ValeurFiltre = Remplace(a_ValeurFiltre, "'", "''") 
       	
-      	l_RequeteSQL	= ChaîneConstruit("SELECT * FROM %1 WHERE %2 = '%3'", ...
-      	m_Table, a_RubriqueFiltre, a_ValeurFiltre)
+      	// Aiguillage selon l'opérateur demandé par le client
+      	SI Minuscule(a_Operateur) = "contient" ALORS
+      		// Construction pour une recherche partielle (LIKE '%valeur%')
+      		// Note: On ajoute les '%' directement autour de la valeur pour éviter 
+      		// les conflits d'échappement avec ChaîneConstruit.
+      		l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 LIKE '%3'", ...
+      		m_Table, a_RubriqueFiltre, "%" + a_ValeurFiltre + "%")
+      	SINON
+      		// Construction par défaut pour une recherche exacte (= 'valeur')
+      		l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 = '%3'", ...
+      		m_table, a_RubriqueFiltre, a_ValeurFiltre)
+      	FIN
       SINON
-      	// Aucun filtre, on sélectionne tout
-      	l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1", m_Table)
+      	// Aucun filtre
+      	l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1", m_table)
       FIN
       
-      // 2. Exécution dans le contexte HFSQL du thread courant
+      // Exécution et sérialisation dynamique (inchangé)
       SI HExécuteRequêteSQL(l_SourceDonnees, hRequêteDéfaut, l_RequeteSQL) ALORS
-      	
-      	// 3. Parcours des résultats pour construire le tableau JSON
       	POUR TOUT l_SourceDonnees
-      		SI PAS l_Premier ALORS l_TableauJson += ","
-      		
-      		// ICI : Appel de ta méthode interne qui convertit l'enregistrement courant en JSON
-      		l_TableauJson += _GenererJsonDepuisSource(l_SourceDonnees)
-      		
-      		l_Premier = Faux
+      		l_VariantLigne = l_SourceDonnees
+      		TableauAjoute(l_VariantTableau, l_VariantLigne)
       	FIN
-      	
-      	l_TableauJson += "]"
-      	
-      	// 4. Affectation du résultat aux propriétés de l'objet
-      	
-      	m_json		= l_TableauJson
+      	m_json		= VariantVersJSON(l_VariantTableau)
       	m_erreur	= ""
-      	
       SINON
-      	// Récupération formatée de l'erreur HFSQL
       	m_erreur = "{""erreur"": ""Erreur SQL : " + HErreurInfo() + """}"
       FIN
       
       HAnnuleDéclaration(l_SourceDonnees)
-      
      type : 458752
    -
      name : _GenererJsonDepuisSource
