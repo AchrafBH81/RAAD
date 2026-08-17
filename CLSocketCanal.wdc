@@ -68,10 +68,10 @@ class :
       
       m_EnteteRequete		= Décode(m_MessageSocketRecu[[ À Position(m_MessageSocketRecu,RC+RC)-1]],encodeURLVersUTF8)
       m_CorpsRequete		= Décode(m_MessageSocketRecu[[Position(m_MessageSocketRecu,RC+RC)+4 À ]],encodeURLVersUTF8)
-      m_PositionUrl	= Position(m_EnteteRequete,"/")
-      m_TypeReq		= SansEspace(m_EnteteRequete[1 À m_PositionUrl-1])
-      m_UrlRecue		= SansEspace(m_EnteteRequete[[m_PositionUrl+1 À Position(m_EnteteRequete,"HTTP",m_PositionUrl)-1]])
-      m_PointDEntree	= Minuscule( m_UrlRecue[[  À Position(m_UrlRecue,"/")-1 ]])
+      m_PositionUrl		= Position(m_EnteteRequete,"/")
+      m_TypeReq			= SansEspace(m_EnteteRequete[1 À m_PositionUrl-1])
+      m_UrlRecue			= SansEspace(m_EnteteRequete[[m_PositionUrl+1 À Position(m_EnteteRequete,"HTTP",m_PositionUrl)-1]])
+      m_PointDEntree		= Minuscule( m_UrlRecue[[  À Position(m_UrlRecue,"/")-1 ]])
       
       _ExtraireParametres()
      type : 458752
