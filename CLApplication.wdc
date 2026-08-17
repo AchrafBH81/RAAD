@@ -146,7 +146,7 @@ class :
       
       // Configuration du Serveur
       m_ServeurSocket								= allouer un CLServeurSocket
-      m_ServeurSocket.m_ProcedureRappel				= MessageRecu
+      m_ServeurSocket.m_ProcedureRappel			= MessageRecu
       m_ServeurSocket.P_PortSocket				= Val(m_Configuration.LireParametre("Serveur", "Port", "8080"))
       m_ServeurSocket.P_CheminPhpCgi				= m_Configuration.LireParametre("Serveur", "CheminPhpCgi", "")
       m_ServeurSocket.p_NomSocketEcoute			= "SocketRaaD"
