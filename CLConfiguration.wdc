@@ -38,6 +38,10 @@ class :
       	m_TabReponse		est un tableau associatif de chaînes
       	m_TabExtensions		est un tableau associatif de chaînes
       	
+      	// Chemins Système (Centralisés)
+      	m_CheminCertSSL		est une chaîne
+      	m_CheminCleSSL		est une chaîne
+      	
       FIN
      type : 131072
   procedures :
@@ -52,6 +56,10 @@ class :
       m_RepertoireRacineExe	= ComplèteRep(fRepExe())
       m_RepertoireProjects	= ComplèteRep(m_RepertoireRacineExe + "Projects")
       m_RepertoireSysteme		= ComplèteRep(m_RepertoireRacineExe + "Systeme")
+      m_CheminCertSSL		= m_RepertoireSysteme+"\SSl\cert.pem"
+      m_CheminCleSSL		= m_RepertoireSysteme+"\SSl\key.pem"
+      
+      
       
       // 2. Vérification et création préventive des dossiers racines essentiels
       SI PAS fRepExiste(m_RepertoireProjects) ALORS

@@ -24,11 +24,9 @@ class :
       	//m_FichierIni				est CLIniFichier dynamique
       	m_Configuration					est CLConfiguration dynamique
       	m_Journal						est CLjournalisation dynamique
-      	m_systeme						est CLSysteme dynamique 
       	m_Base							est CLBase dynamique  
-      	m_structureProjet				est CLGestionnaireStructureProjet dynamique
       	m_CodeReponse					est un tableau associatif de buffers 
-      	m_MonitoringServeur est un CLMonitoring("C:")
+      	m_MonitoringServeur				est un CLMonitoring
       fin
       
      type : 131072
@@ -59,40 +57,65 @@ class :
      type_code : 12
      code : |1-
       
-      procédure MessageRecu(a_SocketRecu est CLCanalSocket) 
+      // ==============================================================================
+      // Méthode : MessageRecu (CLApplication.wdc)
+      // Rôle    : Point d'entrée de chaque socket threadé avec télémétrie intégrée
+      // ==============================================================================
+      PROCÉDURE MessageRecu(a_SocketRecu est CLCanalSocket)
       
-      m_MonitoringServeur.IncrementerSocketsActifs()
+      // 1. Début du chronomètre pour le calcul de la latence
+      l_DateHeureDebut est une DateHeure = DateHeureSys()
       
-      // 1. Décodage et parsing initial de la requête HTTP
-      a_SocketRecu.AnalyserRequete()
+      // 2. Notification de connexion socket active
+      m_MonitoringServeur:IncrementerSocketsActifs()
+      
+      // 3. Décodage et parsing initial des entêtes et de l'URL
+      a_SocketRecu:AnalyserRequete()
       
       LOCAL
-      	l_UriDemande est une chaîne = a_SocketRecu.m_UrlRecue
+      	l_UriDemande est une chaîne = a_SocketRecu:m_UrlRecue
       	
-      	// =================================================================================
-      	// AIGUILLAGE PRINCIPAL : API VS FICHIERS STATIQUES (Rétrocompatibilité WinDev 25)
-      	// =================================================================================
+      	// ==============================================================================
+      	// AIGUILLAGE DU ROUTEUR (Compatible WinDev 25)
+      	// ==============================================================================
       	
-      // Vérification O(1) via Position() au lieu du CommencePar() inexistant en V25
-      SI Position(l_UriDemande, "api/v1/data/", 1, SansCasse) = 1 ALORS
-      	// Délégation complète du traitement de l'API à notre nouvelle méthode dédiée
+      // Route 1 : API Métriques de Supervision RaaD Ops
+      SI Position(l_UriDemande, "api/v1/monitoring/systeme", 1, SansCasse) = 1 ALORS
+      	_TraiterRequeteMonitoring(a_SocketRecu)
+      	
+      	// Route 2 : ORM et Données REST
+      SINON SI Position(l_UriDemande, "api/v1/data/", 1, SansCasse) = 1 ALORS
       	_TraiterRequeteApi(a_SocketRecu)
       	
+      	// Route 3 : Requêtes SQL directes
       SINON SI Position(l_UriDemande, "api/v1/sql", 1, SansCasse) = 1 ALORS
       	_ExecuterRequeteSQL(a_SocketRecu)
       	
+      	// Route 4 : Diagnostic Mémoire Système
       SINON SI Position(l_UriDemande, "api/v1/memoire", 1, SansCasse) = 1 ALORS
       	_GetMemory(a_SocketRecu)
       	
+      	// Route 5 : Fichiers statiques WWW (index.html, dashboard, js, css)
       SINON
-      	// Par défaut, traitement des ressources statiques (HTML, CSS, images)
       	_ObtenirFichier(a_SocketRecu)
       FIN
       
-      // Envoi final de la réponse construite au client TCP
-      a_SocketRecu.GenererReponse()
+      // 4. Envoi final de la réponse construite au client TCP
+      a_SocketRecu:GenererReponse()
       
-      m_MonitoringServeur.DecrementerSocketsActifs()
+      // 5. Calcul précis de la latence d'exécution
+      l_DureeEcoulee	est une Durée	= DateHeureSys() - l_DateHeureDebut
+      l_LatenceMs		est un réel		= l_DureeEcoulee..EnMillisecondes
+      
+      // 6. Extraction du code statut numérique (ex: "200 OK" -> 200, "500 Internal Error" -> 500)
+      l_CodeStatut	est un entier	= Val(a_SocketRecu:m_CodeReponse)
+      SI l_CodeStatut = 0 ALORS
+      	l_CodeStatut = 200
+      FIN
+      
+      // 7. Enregistrement des métriques dans le moteur de monitoring
+      m_MonitoringServeur:EnregistrerRequete(l_CodeStatut, l_LatenceMs)
+      m_MonitoringServeur:DecrementerSocketsActifs()
      type : 458752
    -
      name : Execute
@@ -123,20 +146,16 @@ class :
       
       procédure PRIVÉE _Init()
       
-      // 1. Initialisation de la structure (Point de départ unique)
-      m_structureProjet	= new CLGestionnaireStructureProjet
+      
       // 2. Initialisation du service de Log (Nécessite le répertoire Log de la structure)
       m_Journal				= new CLjournalisation
       // Imaginons une méthode d'initialisation pour le log
       // m_journal.Initialiser(m_structureProjet.P_RepLog())
       
       
-      m_systeme			= new CLSysteme
-      
-      
       // Remplacement du lecteur INI
-      m_Configuration		= allouer un CLConfiguration(m_structureProjet.P_RepConf + "\config.conf")
-      
+      m_Configuration		= allouer un CLConfiguration(frepexe() + "\conf\config.conf")
+      m_MonitoringServeur = allouer un CLMonitoring("C:")
       // Initialisation de la BDD
       m_Base = allouer un CLBase
       m_Base.Initialisation(m_Configuration, m_Journal) 
@@ -431,6 +450,25 @@ class :
       	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
       	a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Une erreur interne est survenue lors du routage de la requête.""}"
       FIN
+     type : 458752
+   -
+     name : _TraiterRequeteMonitoring
+     procedure_id : 1911473459928725536
+     type_code : 12
+     code : |1+
+      
+      PROCÉDURE PRIVÉE _TraiterRequeteMonitoring(a_SocketRecu est CLCanalSocket)
+      
+      QUAND EXCEPTION DANS
+      	a_SocketRecu:m_CodeReponse		= "200 OK"
+      	a_SocketRecu:m_ContenuBuffer	= m_MonitoringServeur:ObtenirJsonMetriques()
+      	a_SocketRecu:m_Extension		= ".json"
+      FAIRE
+      	a_SocketRecu:m_CodeReponse		= "500 Internal Server Error"
+      	a_SocketRecu:m_ContenuBuffer	= "{""erreur"": ""Impossible de générer la télémétrie système.""}"
+      	a_SocketRecu:m_Extension		= ".json"
+      FIN
+      
      type : 458752
   procedure_templates : []
   property_templates : []

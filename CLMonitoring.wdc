@@ -203,12 +203,13 @@ class :
       // ==============================================================================
       PROCÉDURE PRIVÉE ActualiserMetriquesSiNecessaire()
       
-      l_DateHeureActuelle			est une DateHeure	= DateHeureSys()
-      l_DifferenceMillisecondes	est un entier sur 8 octets
+      l_DateHeureActuelle			est une DateHeure			= DateHeureSys()
       
-      l_DifferenceMillisecondes = DateHeureDifférence(m_DernierCalculMetriques, l_DateHeureActuelle)
+      // En WinDev 25, la soustraction de deux DateHeure renvoie un type 'Durée'
+      l_DureeEcoulee				est une Durée				= l_DateHeureActuelle - m_DernierCalculMetriques
+      l_DifferenceMillisecondes	est un entier sur 8 octets	= l_DureeEcoulee..EnMillisecondes
       
-      // Si moins d'une seconde s'est écoulée, on utilise les valeurs en cache pour ne pas saturer le CPU
+      // Si moins d'une seconde s'est écoulée, on conserve le cache RAM
       SI l_DifferenceMillisecondes < 1000 ALORS
       	RETOUR
       FIN
@@ -233,10 +234,10 @@ class :
       m_SommeLatenceRequetes		= 0.0
       m_NombreRequetesPourLatence	= 0
       
-      // 3. Calcul de la charge CPU via l'API Windows
+      // 3. Calcul de la charge CPU Windows
       CalculerChargeCpuSysteme()
       
-      // 4. Estimation des I/O Réseau basée sur le débit HTTP actuel
+      // 4. Estimation du débit réseau
       CalculerDebitReseau(l_FacteurTempsReel)
       
       m_DernierCalculMetriques = l_DateHeureActuelle
@@ -390,7 +391,7 @@ class :
       // Rafraîchissement des compteurs si nécessaire
       ActualiserMetriquesSiNecessaire()
       
-      // Collecte des ressources
+      // Collecte des ressources mémoire et disque
       l_RamTotaleGo		est un réel
       l_RamUtiliseeGo		est un réel
       l_PourcentageRam	est un entier
@@ -401,44 +402,44 @@ class :
       l_PourcentageDisque	est un entier
       ObtenirMetriquesDisque(l_DisqueTotalGo, l_DisqueUtiliseGo, l_PourcentageDisque)
       
-      // Calcul Uptime
-      l_SecondesUptime est un entier sur 8 octets
-      l_SecondesUptime = DateHeureDifférence(m_DateHeureDemarrage, DateHeureSys()) / 1000
+      // Calcul de l'Uptime via le type Durée
+      l_DureeUptime		est une Durée				= DateHeureSys() - m_DateHeureDemarrage
+      l_SecondesUptime	est un entier sur 8 octets	= l_DureeUptime..EnSecondes
       
-      // Calcul Taux d'erreur
-      l_TauxErreur est un réel = 0.0
+      // Calcul du taux d'erreur serveur
+      l_TauxErreur		est un réel					= 0.0
       SI m_TotalRequetesCumulees > 0 ALORS
       	l_TauxErreur = Arrondi((m_TotalErreursHttp * 100.0) / m_TotalRequetesCumulees, 2)
       FIN
       
-      // Diagnostic IA
+      // Diagnostic heuristique IA
       l_StatutIa	est une chaîne
       l_MessageIa	est une chaîne
       GenererDiagnosticIa(m_ChargeCpuCalculee, l_PourcentageRam, l_TauxErreur, l_StatutIa, l_MessageIa)
       
-      // Construction de la réponse JSON conforme au Dashboard
+      // Construction du JSON
       l_JsonFormat	est une chaîne
       l_TemplateJson	est une chaîne	= [
-      	{
-      		"en_ligne": true,
-      		"charge_cpu": %1,
-      		"ram_utilisee_go": %2,
-      		"ram_totale_go": %3,
-      		"ram_pourcentage": %4,
-      		"disque_utilise_go": %5,
-      		"disque_total_go": %6,
-      		"disque_pourcentage": %7,
-      		"reseau_rx_kbs": %8,
-      		"reseau_tx_kbs": %9,
-      		"sockets_actifs": %10,
-      		"threads_actifs": %11,
-      		"requetes_par_seconde": %12,
-      		"latence_ms": %13,
-      		"taux_erreur": %14,
-      		"uptime_secondes": %15,
-      		"ia_statut": "%16",
-      		"ia_message": "%17"
-      	}
+      		{
+      			"en_ligne": true,
+      			"charge_cpu": %1,
+      			"ram_utilisee_go": %2,
+      			"ram_totale_go": %3,
+      			"ram_pourcentage": %4,
+      			"disque_utilise_go": %5,
+      			"disque_total_go": %6,
+      			"disque_pourcentage": %7,
+      			"reseau_rx_kbs": %8,
+      			"reseau_tx_kbs": %9,
+      			"sockets_actifs": %10,
+      			"threads_actifs": %11,
+      			"requetes_par_seconde": %12,
+      			"latence_ms": %13,
+      			"taux_erreur": %14,
+      			"uptime_secondes": %15,
+      			"ia_statut": "%16",
+      			"ia_message": "%17"
+      		}
       ]
       
       l_JsonFormat = ChaîneConstruit(l_TemplateJson, ...
@@ -452,7 +453,7 @@ class :
       NumériqueVersChaîne(m_DebitRxCalculeKoSec, "10.1f"), ...
       NumériqueVersChaîne(m_DebitTxCalculeKoSec, "10.1f"), ...
       m_SocketsActifs, ...
-      m_SocketsActifs + 4, ... // Threads pool système de base
+      m_SocketsActifs + 4, ...
       m_RequetesParSecondeCalculees, ...
       NumériqueVersChaîne(m_LatenceMoyenneCalculee, "10.2f"), ...
       NumériqueVersChaîne(l_TauxErreur, "10.2f"), ...
