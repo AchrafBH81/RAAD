@@ -63,11 +63,11 @@ class :
       procédure ChargeConfiguration()
       
       // On adapte la lecture de la base de données avec la nouvelle syntaxe
-      m_connexion..Provider		= m_Configuration.LireParametre("BDD", "Provider", "WinDevClientServeurHF")
-      m_connexion..Serveur		= m_Configuration.LireParametre("BDD", "Serveur", "127.0.0.1")
-      m_connexion..BaseDeDonnées	= m_Configuration.LireParametre("BDD", "BaseDeDonnées", "Test")
-      m_connexion..Utilisateur	= m_Configuration.LireParametre("BDD", "Utilisateur", "admin")
-      m_connexion..MotDePasse		= m_Configuration.LireParametre("BDD", "MotDePasse", "")
+      m_connexion..Provider		= m_Configuration.LireParametreBDD("Provider", "WinDevClientServeurHF")
+      m_connexion..Serveur		= m_Configuration.LireParametreBDD("Serveur", "127.0.0.1")
+      m_connexion..BaseDeDonnées	= m_Configuration.LireParametreBDD("BaseDeDonnées", "Test")
+      m_connexion..Utilisateur	= m_Configuration.LireParametreBDD("Utilisateur", "admin")
+      m_connexion..MotDePasse		= m_Configuration.LireParametreBDD("MotDePasse", "")
      type : 458752
    -
      name : Initialisation

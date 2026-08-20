@@ -27,8 +27,8 @@ class :
       	m_systeme						est CLSysteme dynamique 
       	m_Base							est CLBase dynamique  
       	m_structureProjet				est CLGestionnaireStructureProjet dynamique
-      	m_GestionnaireVHost				est CLGestionnaireVHost dynamique
       	m_CodeReponse					est un tableau associatif de buffers 
+      	m_MonitoringServeur est un CLMonitoring("C:")
       fin
       
      type : 131072
@@ -57,9 +57,11 @@ class :
      name : MessageRecu
      procedure_id : 1465891540924885333
      type_code : 12
-     code : |1+
+     code : |1-
       
       procédure MessageRecu(a_SocketRecu est CLCanalSocket) 
+      
+      m_MonitoringServeur.IncrementerSocketsActifs()
       
       // 1. Décodage et parsing initial de la requête HTTP
       a_SocketRecu.AnalyserRequete()
@@ -90,6 +92,7 @@ class :
       // Envoi final de la réponse construite au client TCP
       a_SocketRecu.GenererReponse()
       
+      m_MonitoringServeur.DecrementerSocketsActifs()
      type : 458752
    -
      name : Execute
@@ -127,18 +130,12 @@ class :
       // Imaginons une méthode d'initialisation pour le log
       // m_journal.Initialiser(m_structureProjet.P_RepLog())
       
-      // 3. Initialisation du Gestionnaire de VHost
-      m_GestionnaireVHost	= new CLGestionnaireVHost
-      // On utilise P_RepConf() pour localiser le fichier de configuration [cite: 119, 120]
-      m_GestionnaireVHost.Initialisation(m_structureProjet.P_RepConf + "\vhosts.conf", m_Journal)
-      
       
       m_systeme			= new CLSysteme
       
       
       // Remplacement du lecteur INI
-      m_Configuration		= allouer un CLConfiguration
-      m_Configuration.Initialisation(m_structureProjet.P_RepConf + "\config.conf", m_Journal)
+      m_Configuration		= allouer un CLConfiguration(m_structureProjet.P_RepConf + "\config.conf")
       
       // Initialisation de la BDD
       m_Base = allouer un CLBase
@@ -147,9 +144,9 @@ class :
       // Configuration du Serveur
       m_ServeurSocket								= allouer un CLServeurSocket
       m_ServeurSocket.m_ProcedureRappel			= MessageRecu
-      m_ServeurSocket.P_PortSocket				= Val(m_Configuration.LireParametre("Serveur", "Port", "8080"))
-      m_ServeurSocket.P_CheminPhpCgi				= m_Configuration.LireParametre("Serveur", "CheminPhpCgi", "")
-      m_ServeurSocket.p_NomSocketEcoute			= "SocketRaaD"
+      m_ServeurSocket.P_PortSocket				= Val(m_Configuration.LireParametreServeur("Port", "8080"))
+      m_ServeurSocket.P_CheminPhpCgi				= m_Configuration.LireParametreServeur("CheminPhpCgi", "")
+      m_ServeurSocket.p_NomSocketEcoute			= m_Configuration.LireParametreServeur("NameServer","SocketRaaD")
       m_ServeurSocket.P_CLconfiguration           = m_Configuration
      type : 458752
    -

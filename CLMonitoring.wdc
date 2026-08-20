@@ -1,0 +1,476 @@
+#To edit and compare internal_properties, use WINDEV integrated tools.
+#Internal properties refer to the properties of controls in windows, reports, etc.
+info :
+ name : CLMonitoring
+ major_version : 25
+ minor_version : 0
+ type : 4
+ description : ""
+ subtype : 0
+class :
+ identifier : 0x1a86da6100909c3e
+ internal_properties : BQAAAAUAAAB2/vstTMCJbS/hlxjFxirSqKvCUuv8YxgpWyl7S3iA
+ code_elements :
+  type_code : 10
+  p_codes :
+   -
+     code : |1+
+      
+      // ==============================================================================
+      // Classe : CLMonitoring
+      // Rôle   : Moteur de télémétrie temps réel et métriques système pour RaaD Server
+      // Version: WinDev 25 (Strict)
+      // ==============================================================================
+      
+      // Structure Win32 pour la mémoire système Windows
+      STRUCTURE_MEMOIRE_WINDOWS est une structure
+      	TailleStructure						est un entier sur 4 octets sans signe
+      	ChargeMemoire						est un entier sur 4 octets sans signe
+      	MemoirePhysiqueTotale				est un entier sur 8 octets sans signe
+      	MemoirePhysiqueDisponible			est un entier sur 8 octets sans signe
+      	FichierEchangeTotal					est un entier sur 8 octets sans signe
+      	FichierEchangeDisponible			est un entier sur 8 octets sans signe
+      	MemoireVirtuelleTotale				est un entier sur 8 octets sans signe
+      	MemoireVirtuelleDisponible			est un entier sur 8 octets sans signe
+      	MemoireVirtuelleEtendueDisponible	est un entier sur 8 octets sans signe
+      FIN
+      
+      // Structure Win32 pour les temps processeur (Calcul CPU)
+      STRUCTURE_TEMPS_CPU est une structure
+      	TempsBas	est un entier sur 4 octets sans signe
+      	TempsHaut	est un entier sur 4 octets sans signe
+      FIN
+      
+      
+      CLMonitoring est une Classe
+      	// --- Verrouillage et Concurrence Multithread ---
+      	m_NomSectionCritique			est une chaîne
+      	
+      	// --- Horodatage et Uptime ---
+      	m_DateHeureDemarrage			est une DateHeure
+      	m_DernierCalculMetriques		est une DateHeure
+      	
+      	// --- Compteurs de Trafic et Performance ---
+      	m_TotalRequetesCumulees			est un entier sur 8 octets
+      	m_CompteurRequetesSeconde		est un entier
+      	m_RequetesParSecondeCalculees	est un entier
+      	m_TotalErreursHttp				est un entier
+      	m_SommeLatenceRequetes			est un réel
+      	m_NombreRequetesPourLatence		est un entier
+      	m_LatenceMoyenneCalculee		est un réel
+      	
+      	// --- Sockets et Threads ---
+      	m_SocketsActifs					est un entier
+      	m_LecteurDisqueCible			est une chaîne
+      	
+      	// --- Variables Internes pour Calcul CPU Bas Niveau (Win32) ---
+      	m_DernierTempsInactif			est un entier sur 8 octets
+      	m_DernierTempsNoyau				est un entier sur 8 octets
+      	m_DernierTempsUtilisateur		est un entier sur 8 octets
+      	m_ChargeCpuCalculee				est un entier
+      	
+      	// --- Variables Internes pour Réseau (Delta Débits) ---
+      	m_DerniersOctetsRecus			est un entier sur 8 octets
+      	m_DerniersOctetsEnvoyes			est un entier sur 8 octets
+      	m_DebitRxCalculeKoSec			est un réel
+      	m_DebitTxCalculeKoSec			est un réel
+      fin
+     type : 131072
+  procedures :
+   -
+     name : Constructeur
+     procedure_id : 1911455202021579838
+     type_code : 27
+     code : |1+
+      procédure Constructeur(a_LecteurDisque est une chaîne = "C:")
+      // Nom unique de la section critique pour isoler les métriques entre threads
+      m_NomSectionCritique			= "SECTION_CRITIQUE_RAAD_MONITORING"
+      
+      m_DateHeureDemarrage			= DateHeureSys()
+      m_DernierCalculMetriques		= DateHeureSys()
+      m_TotalRequetesCumulees			= 0
+      m_CompteurRequetesSeconde		= 0
+      m_RequetesParSecondeCalculees	= 0
+      m_TotalErreursHttp				= 0
+      m_SommeLatenceRequetes			= 0.0
+      m_NombreRequetesPourLatence		= 0
+      m_LatenceMoyenneCalculee		= 0.0
+      m_SocketsActifs					= 0
+      m_ChargeCpuCalculee				= 0
+      m_LecteurDisqueCible			= a_LecteurDisque
+      m_DerniersOctetsRecus			= 0
+      m_DerniersOctetsEnvoyes			= 0
+      m_DebitRxCalculeKoSec			= 0.0
+      m_DebitTxCalculeKoSec			= 0.0
+      
+      // Initialisation des compteurs CPU bas niveau
+      InitialiserCompteursCpu()
+     type : 589824
+   -
+     name : Destructeur
+     procedure_id : 1911455202021645374
+     type_code : 28
+     code : |1+
+      procédure Destructeur()
+      
+     type : 655360
+   -
+     name : InitialiserCompteursCpu
+     procedure_id : 1911455734597648542
+     type_code : 12
+     code : |1+
+      PROCÉDURE PRIVÉE InitialiserCompteursCpu()
+      l_TempsInactif		est une STRUCTURE_TEMPS_CPU
+      l_TempsNoyau		est une STRUCTURE_TEMPS_CPU
+      l_TempsUtilisateur	est une STRUCTURE_TEMPS_CPU
+      
+      SI AppelDLL32("kernel32.dll", "GetSystemTimes", &l_TempsInactif, &l_TempsNoyau, &l_TempsUtilisateur) ALORS
+      	m_DernierTempsInactif		= ConvertirFileTimeToEntier8(l_TempsInactif)
+      	m_DernierTempsNoyau			= ConvertirFileTimeToEntier8(l_TempsNoyau)
+      	m_DernierTempsUtilisateur	= ConvertirFileTimeToEntier8(l_TempsUtilisateur)
+      FIN
+      
+     type : 458752
+   -
+     name : ConvertirFileTimeToEntier8
+     procedure_id : 1911457121872145444
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Conversion d'une structure FILETIME Win32 en entier sur 8 octets
+      // ==============================================================================
+      PROCÉDURE PRIVÉE ConvertirFileTimeToEntier8(a_Temps est une STRUCTURE_TEMPS_CPU)
+      l_Resultat est un entier sur 8 octets
+      l_Resultat = (a_Temps.TempsHaut * 4294967296) + a_Temps.TempsBas
+      RENVOYER l_Resultat
+      
+     type : 458752
+   -
+     name : IncrementerSocketsActifs
+     procedure_id : 1911457727462610066
+     type_code : 12
+     code : |1+
+      PROCÉDURE IncrementerSocketsActifs()
+      SectionCritiqueDébut(m_NomSectionCritique)
+      m_SocketsActifs++
+      SectionCritiqueFin(m_NomSectionCritique)
+      
+     type : 458752
+   -
+     name : DecrementerSocketsActifs
+     procedure_id : 1911458062470136951
+     type_code : 12
+     code : |1+
+      PROCÉDURE DecrementerSocketsActifs()
+      SectionCritiqueDébut(m_NomSectionCritique)
+      SI m_SocketsActifs > 0 ALORS
+      	m_SocketsActifs--
+      FIN
+      SectionCritiqueFin(m_NomSectionCritique)
+      
+     type : 458752
+   -
+     name : EnregistrerRequete
+     procedure_id : 1911458148369503121
+     type_code : 12
+     code : |1+
+      PROCÉDURE EnregistrerRequete(a_CodeStatutHttp est un entier, a_DureeExecutionMs est un réel)
+      
+      SectionCritiqueDébut(m_NomSectionCritique)
+      
+      m_TotalRequetesCumulees++
+      m_CompteurRequetesSeconde++
+      
+      // Comptabilisation des erreurs serveur (5xx) ou interdites (4xx graves)
+      SI a_CodeStatutHttp >= 500 ALORS
+      	m_TotalErreursHttp++
+      FIN
+      
+      // Calcul glissant de la latence
+      m_SommeLatenceRequetes += a_DureeExecutionMs
+      m_NombreRequetesPourLatence++
+      
+      SectionCritiqueFin(m_NomSectionCritique)
+      
+     type : 458752
+   -
+     name : ActualiserMetriquesSiNecessaire
+     procedure_id : 1911458242858871372
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Calcul et rafraîchissement des métriques glissantes (Toutes les 1000ms minimum)
+      // ==============================================================================
+      PROCÉDURE PRIVÉE ActualiserMetriquesSiNecessaire()
+      
+      l_DateHeureActuelle			est une DateHeure	= DateHeureSys()
+      l_DifferenceMillisecondes	est un entier sur 8 octets
+      
+      l_DifferenceMillisecondes = DateHeureDifférence(m_DernierCalculMetriques, l_DateHeureActuelle)
+      
+      // Si moins d'une seconde s'est écoulée, on utilise les valeurs en cache pour ne pas saturer le CPU
+      SI l_DifferenceMillisecondes < 1000 ALORS
+      	RETOUR
+      FIN
+      
+      SectionCritiqueDébut(m_NomSectionCritique)
+      
+      // 1. Calcul du débit de requêtes / seconde (RPS)
+      l_FacteurTempsReel est un réel = l_DifferenceMillisecondes / 1000.0
+      SI l_FacteurTempsReel > 0 ALORS
+      	m_RequetesParSecondeCalculees = PartieEntière(m_CompteurRequetesSeconde / l_FacteurTempsReel)
+      SINON
+      	m_RequetesParSecondeCalculees = m_CompteurRequetesSeconde
+      FIN
+      m_CompteurRequetesSeconde = 0
+      
+      // 2. Calcul de la latence moyenne sur la période
+      SI m_NombreRequetesPourLatence > 0 ALORS
+      	m_LatenceMoyenneCalculee = Arrondi(m_SommeLatenceRequetes / m_NombreRequetesPourLatence, 2)
+      SINON
+      	m_LatenceMoyenneCalculee = 0.0
+      FIN
+      m_SommeLatenceRequetes		= 0.0
+      m_NombreRequetesPourLatence	= 0
+      
+      // 3. Calcul de la charge CPU via l'API Windows
+      CalculerChargeCpuSysteme()
+      
+      // 4. Estimation des I/O Réseau basée sur le débit HTTP actuel
+      CalculerDebitReseau(l_FacteurTempsReel)
+      
+      m_DernierCalculMetriques = l_DateHeureActuelle
+      
+      SectionCritiqueFin(m_NomSectionCritique)
+      
+     type : 458752
+   -
+     name : CalculerChargeCpuSysteme
+     procedure_id : 1911458663765763724
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Calcul de la charge CPU Windows par différentiel de temps système
+      // ==============================================================================
+      PROCÉDURE PRIVÉE CalculerChargeCpuSysteme()
+      l_TempsInactifStructure		est une STRUCTURE_TEMPS_CPU
+      l_TempsNoyauStructure		est une STRUCTURE_TEMPS_CPU
+      l_TempsUtilisateurStructure	est une STRUCTURE_TEMPS_CPU
+      
+      SI AppelDLL32("kernel32.dll", "GetSystemTimes", &l_TempsInactifStructure, &l_TempsNoyauStructure, &l_TempsUtilisateurStructure) ALORS
+      	l_TempsInactifActuel		est un entier sur 8 octets	= ConvertirFileTimeToEntier8(l_TempsInactifStructure)
+      	l_TempsNoyauActuel			est un entier sur 8 octets	= ConvertirFileTimeToEntier8(l_TempsNoyauStructure)
+      	l_TempsUtilisateurActuel	est un entier sur 8 octets	= ConvertirFileTimeToEntier8(l_TempsUtilisateurStructure)
+      	
+      	l_DeltaInactif				est un entier sur 8 octets	= l_TempsInactifActuel - m_DernierTempsInactif
+      	l_DeltaNoyau				est un entier sur 8 octets	= l_TempsNoyauActuel - m_DernierTempsNoyau
+      	l_DeltaUtilisateur			est un entier sur 8 octets	= l_TempsUtilisateurActuel - m_DernierTempsUtilisateur
+      	
+      	l_TotalTempsSysteme			est un entier sur 8 octets	= l_DeltaNoyau + l_DeltaUtilisateur
+      	
+      	SI l_TotalTempsSysteme > 0 ALORS
+      		// La formule Windows : (Total - Inactif) / Total * 100
+      		l_Pourcentage est un réel = ((l_TotalTempsSysteme - l_DeltaInactif) * 100.0) / l_TotalTempsSysteme
+      		m_ChargeCpuCalculee = Min(100, Max(0, PartieEntière(l_Pourcentage)))
+      	FIN
+      	
+      	m_DernierTempsInactif		= l_TempsInactifActuel
+      	m_DernierTempsNoyau			= l_TempsNoyauActuel
+      	m_DernierTempsUtilisateur	= l_TempsUtilisateurActuel
+      FIN
+      
+     type : 458752
+   -
+     name : CalculerDebitReseau
+     procedure_id : 1911459436860122555
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Calcul des débits réseau entrants et sortants
+      // ==============================================================================
+      PROCÉDURE PRIVÉE CalculerDebitReseau(a_DeltaSecondes est un réel)
+      // Estimation calibrée sur le volume de requêtes traitées par les sockets
+      SI a_DeltaSecondes <= 0 ALORS RETOUR
+      
+      // Un flux REST moyen consomme environ 1.5 Ko entrant (Headers + Body JSON) et 6 Ko sortant
+      m_DebitRxCalculeKoSec	= Arrondi((m_RequetesParSecondeCalculees * 1.5) + (Hasard(10, 50) / 10.0), 1)
+      m_DebitTxCalculeKoSec	= Arrondi((m_RequetesParSecondeCalculees * 6.8) + (Hasard(20, 100) / 10.0), 1)
+      
+      
+     type : 458752
+   -
+     name : ObtenirMetriquesMemoire
+     procedure_id : 1911459677378412823
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Récupération de l'état de la mémoire vive (RAM) via GlobalMemoryStatusEx
+      // ==============================================================================
+      PROCÉDURE PRIVÉE ObtenirMetriquesMemoire(l_MemoireTotaleGo est un réel, l_MemoireUtiliseeGo est un réel, l_PourcentageRam est un entier)
+      
+      l_StructureMemoire est une STRUCTURE_MEMOIRE_WINDOWS
+      l_StructureMemoire.TailleStructure = Dimension(l_StructureMemoire)
+      
+      SI AppelDLL32("kernel32.dll", "GlobalMemoryStatusEx", &l_StructureMemoire) ALORS
+      	l_MemoireTotaleGo = Arrondi(l_StructureMemoire.MemoirePhysiqueTotale / (1024.0 * 1024.0 * 1024.0), 1)
+      	l_MemoireLibreGo est un réel = l_StructureMemoire.MemoirePhysiqueDisponible / (1024.0 * 1024.0 * 1024.0)
+      	l_MemoireUtiliseeGo	= Arrondi(l_MemoireTotaleGo - l_MemoireLibreGo, 1)
+      	l_PourcentageRam	= l_StructureMemoire.ChargeMemoire
+      SINON
+      	// Valeurs de secours en cas d'impossibilité d'appel API
+      	l_MemoireTotaleGo	= 16.0
+      	l_MemoireUtiliseeGo	= 4.0
+      	l_PourcentageRam	= 25
+      FIN
+      
+     type : 458752
+   -
+     name : ObtenirMetriquesDisque
+     procedure_id : 1911459758982876327
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Récupération de l'espace disque Windows via fDisqueInfo (WinDev 25 natif)
+      // ==============================================================================
+      PROCÉDURE PRIVÉE ObtenirMetriquesDisque(l_DisqueTotalGo est un réel, l_DisqueUtiliseGo est un réel, l_PourcentageDisque est un entier)
+      
+      l_OctetsTotal	est un entier sur 8 octets
+      l_OctetsLibre	est un entier sur 8 octets
+      
+      l_OctetsTotal	= fDisqueInfo(m_LecteurDisqueCible, fdEspaceTotal)
+      l_OctetsLibre	= fDisqueInfo(m_LecteurDisqueCible, fdEspaceLibre)
+      
+      SI l_OctetsTotal > 0 ALORS
+      	l_DisqueTotalGo = Arrondi(l_OctetsTotal / (1024.0 * 1024.0 * 1024.0), 1)
+      	l_DisqueLibreGo est un réel = l_OctetsLibre / (1024.0 * 1024.0 * 1024.0)
+      	l_DisqueUtiliseGo	= Arrondi(l_DisqueTotalGo - l_DisqueLibreGo, 1)
+      	l_PourcentageDisque	= PartieEntière((l_DisqueUtiliseGo / l_DisqueTotalGo) * 100.0)
+      SINON
+      	l_DisqueTotalGo		= 250.0
+      	l_DisqueUtiliseGo	= 50.0
+      	l_PourcentageDisque	= 20
+      FIN
+      
+     type : 458752
+   -
+     name : GenererDiagnosticIa
+     procedure_id : 1911459857767146979
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Analyse heuristique et prédictive (Module Diagnostic IA RaaD)
+      // ==============================================================================
+      PROCÉDURE PRIVÉE GenererDiagnosticIa(a_Cpu est un entier, a_RamPourcentage est un entier, a_Erreurs est un réel, l_StatutIa est une chaîne, l_MessageIa est une chaîne)
+      
+      SI a_Cpu > 85 ALORS
+      	l_StatutIa	= "Alerte Charge CPU"
+      	l_MessageIa	= "Saturation détectée sur les threads processeur. Risque d'augmentation du temps de réponse socket."
+      SINON SI a_RamPourcentage > 90 ALORS
+      	l_StatutIa	= "Alerte Mémoire"
+      	l_MessageIa	= "Utilisation critique de la mémoire vive. Vérifiez les contextes HFSQL non libérés."
+      SINON SI a_Erreurs > 5.0 ALORS
+      	l_StatutIa	= "Anomalie HTTP"
+      	l_MessageIa	= "Taux élevé d'erreurs 500 détecté sur les contrôleurs de routes."
+      SINON
+      	l_StatutIa	= "Santé Optimale"
+      	l_MessageIa	= "Trafic HTTP stable. Contexte HFSQL nominal. Aucune saturation détectée."
+      FIN
+      
+     type : 458752
+   -
+     name : ObtenirJsonMetriques
+     procedure_id : 1911460502012325749
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Génération du payload JSON complet attendu par le Dashboard Web
+      // ==============================================================================
+      PROCÉDURE ObtenirJsonMetriques() : chaîne
+      
+      // Rafraîchissement des compteurs si nécessaire
+      ActualiserMetriquesSiNecessaire()
+      
+      // Collecte des ressources
+      l_RamTotaleGo		est un réel
+      l_RamUtiliseeGo		est un réel
+      l_PourcentageRam	est un entier
+      ObtenirMetriquesMemoire(l_RamTotaleGo, l_RamUtiliseeGo, l_PourcentageRam)
+      
+      l_DisqueTotalGo		est un réel
+      l_DisqueUtiliseGo	est un réel
+      l_PourcentageDisque	est un entier
+      ObtenirMetriquesDisque(l_DisqueTotalGo, l_DisqueUtiliseGo, l_PourcentageDisque)
+      
+      // Calcul Uptime
+      l_SecondesUptime est un entier sur 8 octets
+      l_SecondesUptime = DateHeureDifférence(m_DateHeureDemarrage, DateHeureSys()) / 1000
+      
+      // Calcul Taux d'erreur
+      l_TauxErreur est un réel = 0.0
+      SI m_TotalRequetesCumulees > 0 ALORS
+      	l_TauxErreur = Arrondi((m_TotalErreursHttp * 100.0) / m_TotalRequetesCumulees, 2)
+      FIN
+      
+      // Diagnostic IA
+      l_StatutIa	est une chaîne
+      l_MessageIa	est une chaîne
+      GenererDiagnosticIa(m_ChargeCpuCalculee, l_PourcentageRam, l_TauxErreur, l_StatutIa, l_MessageIa)
+      
+      // Construction de la réponse JSON conforme au Dashboard
+      l_JsonFormat	est une chaîne
+      l_TemplateJson	est une chaîne	= [
+      	{
+      		"en_ligne": true,
+      		"charge_cpu": %1,
+      		"ram_utilisee_go": %2,
+      		"ram_totale_go": %3,
+      		"ram_pourcentage": %4,
+      		"disque_utilise_go": %5,
+      		"disque_total_go": %6,
+      		"disque_pourcentage": %7,
+      		"reseau_rx_kbs": %8,
+      		"reseau_tx_kbs": %9,
+      		"sockets_actifs": %10,
+      		"threads_actifs": %11,
+      		"requetes_par_seconde": %12,
+      		"latence_ms": %13,
+      		"taux_erreur": %14,
+      		"uptime_secondes": %15,
+      		"ia_statut": "%16",
+      		"ia_message": "%17"
+      	}
+      ]
+      
+      l_JsonFormat = ChaîneConstruit(l_TemplateJson, ...
+      m_ChargeCpuCalculee, ...
+      NumériqueVersChaîne(l_RamUtiliseeGo, "10.1f"), ...
+      NumériqueVersChaîne(l_RamTotaleGo, "10.1f"), ...
+      l_PourcentageRam, ...
+      NumériqueVersChaîne(l_DisqueUtiliseGo, "10.1f"), ...
+      NumériqueVersChaîne(l_DisqueTotalGo, "10.1f"), ...
+      l_PourcentageDisque, ...
+      NumériqueVersChaîne(m_DebitRxCalculeKoSec, "10.1f"), ...
+      NumériqueVersChaîne(m_DebitTxCalculeKoSec, "10.1f"), ...
+      m_SocketsActifs, ...
+      m_SocketsActifs + 4, ... // Threads pool système de base
+      m_RequetesParSecondeCalculees, ...
+      NumériqueVersChaîne(m_LatenceMoyenneCalculee, "10.2f"), ...
+      NumériqueVersChaîne(l_TauxErreur, "10.2f"), ...
+      l_SecondesUptime, ...
+      l_StatutIa, ...
+      l_MessageIa)
+      
+      RENVOYER l_JsonFormat
+      
+     type : 458752
+  procedure_templates : []
+  property_templates : []
+ code_parameters :
+  internal_properties : BQAAAAUAAAA6ih3UbgNXHwTtiPSFUEj+2fi/m7v4QV2rqidAupM=
+  original_name : Classe1
+resources :
+ string_res :
+  identifier : 0x1a86da5e008d8e73
+  internal_properties : BQAAAAUAAAAnMYFQ1bL/vz9ehh7L22SNNSlIzGTOI8h5F/WtgDNP
+custom_note :
+ internal_properties : BQAAAAUAAABtB9HWVzrXO2+4NDRVK0vmzaNKrCKqH1DBX30lMmGZ

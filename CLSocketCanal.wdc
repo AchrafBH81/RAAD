@@ -155,7 +155,7 @@ class :
       //    Le chemin racine (WWW) est lu directement depuis la configuration pré-chargée en RAM.
       
       LOCAL
-      	l_CheminBaseWWW		est une chaîne
+      
       	l_CheminComplet		est une chaîne
       	
       // 1. Initialisation par défaut
@@ -194,17 +194,20 @@ class :
       // =================================================================================
       // On récupère le répertoire cible directement depuis l'instance de configuration en RAM.
       // (Assure-toi que "RepertoireWWW" est bien chargé lors de l'initialisation du serveur).
-      l_CheminBaseWWW	= m_configuration.LireParametre("Serveur", "RepertoireWWW", "C:\RaaD\WWW")
-      l_CheminComplet	= ComplèteRep(l_CheminBaseWWW) + m_UrlRecue
+      //l_CheminBaseWWW	= m_configuration.LireParametre("Serveur", "RepertoireWWW", "C:\RaaD\WWW")
+      //l_CheminComplet	= ComplèteRep(l_CheminBaseWWW) + m_UrlRecue
+      
       
       
       // 6. Lecture et Traitement du fichier cible
       QUAND EXCEPTION DANS 
+      	l_CheminComplet = m_configuration.ObtenirRepertoireWWW(m_Parametres["Host"])+m_UrlRecue
+      	
       	
       	SELON m_Extension
       		CAS ".php" :
       			// L'exécution PHP reste synchrone au thread courant
-      			m_ContenuBuffer = ExecuterPhp(m_configuration.LireParametre("Serveur", "CheminPhpCgi", ""), l_CheminComplet)
+      			m_ContenuBuffer = ExecuterPhp(m_configuration.LireParametreServeur("CheminPhpCgi", ""), l_CheminComplet)
       			
       		AUTRE CAS :
       			// Chargement brutal en mémoire. C'est l'OS qui gèrera le cache disque (File System Cache).

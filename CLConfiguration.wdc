@@ -14,180 +14,342 @@ class :
   type_code : 10
   p_codes :
    -
-     code : |1+
+     code : |1-
       CLConfiguration est une Classe
-      
-      PRIVÉ
-      	m_RepConfiguration		est une chaîne
-      	m_journal				est CLjournalisation dynamique
       	
-      
+      	// ==============================================================================
+      	// MEMBRES DE LA CLASSE (PROPRIÉTÉS)
+      	// ==============================================================================
       	
-      PUBLIQUE
-      	// Paramètres dynamiques (issus de config.conf)
-      	m_Parametres		est un tableau associatif de chaînes
+      	// Chemin absolu vers le fichier de configuration (ex: Exe\Conf\config.conf)
+      	m_NomFichierConfiguration	est une chaîne
+      	
+      	// Répertoires racines d'infrastructure
+      	m_RepertoireRacineExe		est une chaîne
+      	m_RepertoireProjects		est une chaîne
+      	m_RepertoireSysteme			est une chaîne
+      	
+      	// Tableaux associatifs en RAM pour chaque section
+      	m_ParametresServeur			est un tableau associatif de chaînes
+      	m_ParametresBDD				est un tableau associatif de chaînes
+      	m_ParametresVHost			est un tableau associatif de chaînes
       	
       	// Paramètres statiques (chargés une seule fois au démarrage)
       	m_TabReponse		est un tableau associatif de chaînes
       	m_TabExtensions		est un tableau associatif de chaînes
       	
-      	// Chemins Système (Centralisés)
-      	m_CheminCertSSL		est une chaîne
-      	m_CheminCleSSL		est une chaîne
-      
-      fin
+      FIN
      type : 131072
   procedures :
-   -
-     name : Recharger
-     procedure_id : 1889653265120563942
-     type_code : 12
-     code : |1-
-      //-------------------------------------------------------------------------
-      // Méthode : Recharger (Hot-Reloading)
-      // But : Recharger la configuration SANS crasher les threads en cours
-      //-------------------------------------------------------------------------*
-      procédure publique Recharger()
-      // 1. On parse les nouvelles données dans un tableau TEMPORAIRE (Double Buffer)
-      // Cela évite de bloquer la lecture des autres threads pendant le parsing du fichier sur le disque.
-      tabNouvelleConf est un tableau associatif de chaînes
-      _ParserFichierConf(tabNouvelleConf)
-      
-      m_Parametres = tabNouvelleConf // En WinDev, ceci copie le contenu du tableau
-      
-      
-      m_journal.LogErreur("Configuration rechargée à chaud avec succès.")
-     type : 458752
    -
      name : Constructeur
      procedure_id : 1889385748790355878
      type_code : 27
      code : |1+
-      procédure Constructeur()
+      procédure Constructeur(a_NomFichierConfiguration est une chaîne = "")
       
+      // 1. Détermination du répertoire racine d'exécution (Exe\)
+      m_RepertoireRacineExe	= ComplèteRep(fRepExe())
+      m_RepertoireProjects	= ComplèteRep(m_RepertoireRacineExe + "Projects")
+      m_RepertoireSysteme		= ComplèteRep(m_RepertoireRacineExe + "Systeme")
+      
+      // 2. Vérification et création préventive des dossiers racines essentiels
+      SI PAS fRepExiste(m_RepertoireProjects) ALORS
+      	fRepCrée(m_RepertoireProjects)
+      FIN
+      
+      SI PAS fRepExiste(m_RepertoireSysteme) ALORS
+      	fRepCrée(m_RepertoireSysteme)
+      	fRepCrée(m_RepertoireSysteme + "logs")
+      	fRepCrée(m_RepertoireSysteme + "www")
+      FIN
+      
+      // 3. Chargement de la configuration si le chemin est fourni
+      SI a_NomFichierConfiguration <> "" ALORS
+      	m_NomFichierConfiguration = a_NomFichierConfiguration
+      	ChargerConfiguration(m_NomFichierConfiguration)
+      FIN
      type : 589824
    -
      name : Destructeur
      procedure_id : 1889385748790421414
      type_code : 28
-     code : |1+
+     code : |1-
       procédure Destructeur()
       
+      // Libération explicite de la mémoire des 3 tableaux associatifs
+      SupprimeTout(m_ParametresServeur)
+      SupprimeTout(m_ParametresBDD)
+      SupprimeTout(m_ParametresVHost)
      type : 655360
    -
-     name : Initialisation
-     procedure_id : 1889386096682852937
+     name : ChargerConfiguration
+     procedure_id : 1911106837216296334
+     type_code : 12
+     code : |1-
+      
+      
+      // ==============================================================================
+      // CHARGEMENT ET PARSING DU FICHIER CONFIG.CONF
+      // ==============================================================================
+      
+      /// <summary>
+      /// Charge le fichier de configuration et ventile les données dans les 3 tableaux en mémoire.
+      /// </summary>
+      PROCEDURE ChargerConfiguration(a_NomFichierConfiguration est une chaîne = "") : booléen
+      
+      LOCAL
+      	l_CheminFichier	est une chaîne
+      	l_ContenuTexte	est une chaîne
+      	
+      SI a_NomFichierConfiguration <> "" ALORS
+      	m_NomFichierConfiguration = a_NomFichierConfiguration
+      FIN
+      
+      l_CheminFichier = m_NomFichierConfiguration
+      
+      // Sécurité : Vérification de l'existence physique du fichier
+      SI l_CheminFichier = "" OU PAS fFichierExiste(l_CheminFichier) ALORS
+      	renvoyer  Faux
+      FIN
+      
+      // Lecture intégrale du fichier disque
+      l_ContenuTexte = fChargeTexte(l_CheminFichier)
+      SI l_ContenuTexte = "" ALORS
+      	renvoyer  Faux
+      FIN
+      
+      // Réinitialisation des tableaux avant parsing
+      SupprimeTout(m_ParametresServeur)
+      SupprimeTout(m_ParametresBDD)
+      SupprimeTout(m_ParametresVHost)
+      
+      // Parsing ligne par ligne
+      _ParserFichierConf(l_ContenuTexte)
+      _InitTableauxStatiques()
+      renvoyer Vrai
+     type : 458752
+   -
+     name : _ParserFichierConf
+     procedure_id : 1911107180813694244
      type_code : 12
      code : |1+
-      procédure publique Initialisation(LOCAL a_RepConfiguration est une chaîne, LOCAL a_log est CLjournalisation dynamique)
-      m_RepConfiguration	=  a_RepConfiguration
-      m_journal			= a_log
+      /// Méthode privée : Analyse le contenu texte et ventile dans [Serveur], [BDD] et [VHost].
+      /// </summary>
+      PROCEDURE PRIVÉE _ParserFichierConf(a_ContenuTexte est une chaîne)
       
-      // 1. Initialisation des données "Dures" (Statiques)
-      _InitTableauxStatiques()
+      LOCAL
+      	l_LigneCourante		est une chaîne
+      	l_SectionCourante	est une chaîne	= ""
+      	l_Cle				est une chaîne
+      	l_Valeur			est une chaîne
+      	l_PositionEgal		est un entier
+      	l_NombreLignes		est un entier
+      	l_IndiceLigne		est un entier
+      	
+      l_NombreLignes = ChaîneOccurrence(a_ContenuTexte, RC) + 1
       
-      // 2. Chargement des données "Dynamiques" (Fichier .conf)
-      _ParserFichierConf(m_Parametres)
+      POUR l_IndiceLigne = 1 À l_NombreLignes
+      	
+      	l_LigneCourante = SansEspace(ExtraitChaîne(a_ContenuTexte, l_IndiceLigne, RC))
+      	
+      	// Ignorer lignes vides et commentaires (# ou ;)
+      	SI l_LigneCourante = "" OU Position(l_LigneCourante, "#") = 1 OU Position(l_LigneCourante, ";") = 1 ALORS
+      		CONTINUER
+      	FIN
+      	
+      	// Détection des sections [NomDeSection]
+      	SI Position(l_LigneCourante, "[") = 1 ET Position(l_LigneCourante, "]") = Taille(l_LigneCourante) ALORS
+      		l_SectionCourante = Minuscule(SansEspace(Milieu(l_LigneCourante, 2, Taille(l_LigneCourante) - 2)))
+      		CONTINUER
+      	FIN
+      	
+      	// Extraction du couple Clé=Valeur
+      	l_PositionEgal = Position(l_LigneCourante, "=")
+      	SI l_PositionEgal > 1 ALORS
+      		l_Cle		= SansEspace(Gauche(l_LigneCourante, l_PositionEgal - 1))
+      		l_Valeur	= SansEspace(Milieu(l_LigneCourante, l_PositionEgal + 1))
+      		
+      		// Suppression des guillemets éventuels autour de la valeur
+      		SI (Position(l_Valeur, """") = 1 ET Position(l_Valeur, """", Taille(l_Valeur)) = Taille(l_Valeur)) OU ...
+      			(Position(l_Valeur, "'") = 1 ET Position(l_Valeur, "'", Taille(l_Valeur)) = Taille(l_Valeur)) ALORS
+      			l_Valeur = Milieu(l_Valeur, 2, Taille(l_Valeur) - 2)
+      		FIN
+      		
+      		SELON l_SectionCourante
+      			CAS "serveur":
+      				m_ParametresServeur[l_Cle] = l_Valeur
+      				
+      			CAS "bdd", "basededonnees", "base_de_donnees":
+      				m_ParametresBDD[l_Cle] = l_Valeur
+      				
+      			CAS "host", "hosts", "virtualhosts":
+      				// Stockage de l'hôte en minuscules -> Nom du sous-dossier uniquement
+      				m_ParametresVHost[Minuscule(l_Cle)] = l_Valeur
+      				
+      			AUTRE CAS:
+      				// Section non gérée ignorée
+      		FIN
+      	FIN
+      FIN
+     type : 458752
+   -
+     name : LireParametreBDD
+     procedure_id : 1911110608197674056
+     type_code : 12
+     code : |1-
+      procédure LireParametreBDD(a_Cle est une chaîne, a_ValeurParDefaut est une chaîne = "") : chaîne
       
-      // 3. Centralisation des chemins SSL (surchargables par le .conf)
-      m_CheminCertSSL	= LireParametre("Serveur", "Certificat", fRepExe() + ["\"] + "Systeme\SSl\cert.pem")
-      m_CheminCleSSL	= LireParametre("Serveur", "ClePrivee", fRepExe() + ["\"] + "Systeme\SSl\key.pem")
+      SI m_ParametresBDD[a_Cle]..Existe ALORS
+      	renvoyer m_ParametresBDD[a_Cle]
+      sinon
+      	renvoyer a_ValeurParDefaut
+      FIN
+     type : 458752
+   -
+     name : LireParametreVHost
+     procedure_id : 1911110827241056652
+     type_code : 12
+     code : |1+
+      PROCEDURE LireParametreVHost(a_NomHote est une chaîne) : chaîne
+      
+      LOCAL
+      	l_HoteNormalise			est une chaîne
+      	l_PositionDeuxPoints	est un entier
+      	
+      l_HoteNormalise			= Minuscule(SansEspace(a_NomHote))
+      
+      // Suppression du port HTTP éventuel (ex: "localhost:8080" -> "localhost")
+      l_PositionDeuxPoints	= Position(l_HoteNormalise, ":")
+      SI l_PositionDeuxPoints > 0 ALORS
+      	l_HoteNormalise = Gauche(l_HoteNormalise, l_PositionDeuxPoints - 1)
+      FIN
+      
+      SI m_ParametresVHost[l_HoteNormalise]..Existe ALORS
+      	renvoyer  m_ParametresVHost[l_HoteNormalise]
+      sinon
+      	renvoyer faux
+      FIN
+      
+      
+     type : 458752
+   -
+     name : ObtenirRepertoireWWW
+     procedure_id : 1911112996199718796
+     type_code : 12
+     code : |1+
+      PROCEDURE ObtenirRepertoireWWW(a_NomHote est une chaîne) : chaîne
+      
+      LOCAL
+      l_CheminWWW est une chaîne
+      	
+      l_CheminWWW	= ComplèteRep(ObtenirRepertoireProjet(a_NomHote)) + "www"+["\"]
+      
+      
+      renvoyer l_CheminWWW
+      
+     type : 458752
+   -
+     name : ObtenirRepertoireLogs
+     procedure_id : 1911113077804115826
+     type_code : 12
+     code : |1+
+      PROCEDURE ObtenirRepertoireLogs(a_NomHote est une chaîne) : chaîne
+      
+      LOCAL
+      l_CheminLogs est une chaîne
+      	
+      l_CheminLogs	= ComplèteRep(ObtenirRepertoireProjet(a_NomHote)) + "logs"+["\"]
+      
+      renvoyer  l_CheminLogs
+     type : 458752
+   -
+     name : LireParametreServeur
+     procedure_id : 1911231215175130806
+     type_code : 12
+     code : |1+
+      procédure lireParametreServeur(a_Cle est une chaîne, a_ValeurParDefaut est une chaîne = "") : chaîne
+      
+      SI m_ParametresBDD[a_Cle]..Existe ALORS
+      	RENVOYER m_ParametresServeur[a_Cle]
+      SINON
+      	RENVOYER a_ValeurParDefaut
+      FIN
+      
+     type : 458752
+   -
+     name : ObtenirRepertoireProjet
+     procedure_id : 1911232293211976759
+     type_code : 12
+     code : |1+
+      /// Résout le chemin physique absolu du projet pour un hôte donné.
+      /// Si le projet est "Systeme", pointe sur Exe\Systeme\.
+      /// Sinon, pointe sur Exe\Projects\[NomDossier]\.
+      PROCEDURE ObtenirRepertoireProjet(a_NomHote est une chaîne) : chaîne
+      
+      LOCAL
+      	l_NomDossier	est une chaîne
+      	l_CheminProjet	est une chaîne
+      	
+      l_NomDossier = LireParametreVHost(a_NomHote)
+      
+      SI Minuscule(l_NomDossier) = "systeme" ALORS
+      	l_CheminProjet = m_RepertoireSysteme
+      SINON
+      	l_CheminProjet = ComplèteRep(m_RepertoireProjects + l_NomDossier)
+      FIN
+      
+      
+      
+      renvoyer l_CheminProjet
       
      type : 458752
    -
      name : _InitTableauxStatiques
-     procedure_id : 1889652199968491680
+     procedure_id : 1911248171706554714
      type_code : 12
      code : |1+
-      //-------------------------------------------------------------------------
-      // Méthode : _InitTableauxStatiques
-      // But : Centralise les codes HTML 404, 500, et les extensions MIME
-      //-------------------------------------------------------------------------
-      
       procédure privée _InitTableauxStatiques()
       // --- CODES DE RÉPONSE HTTP ---
-      m_TabReponse["200"]	= ""
-      m_TabReponse["401"]	= "<html><body>Erreur 401 : Accès non autorisé.</body></html>"
-      m_TabReponse["404"]	= "<html><body>Erreur 404 : Ressource introuvable sur le serveur RaaD.</body></html>"
-      m_TabReponse["500"]	= "<html><body>Erreur 500 : Erreur interne du serveur RaaD.</body></html>"
+      m_TabReponse["200"]		= ""
+      m_TabReponse["401"]		= "<html><body>Erreur 401 : Accès non autorisé.</body></html>"
+      m_TabReponse["404"]		= "<html><body>Erreur 404 : Ressource introuvable sur le serveur RaaD.</body></html>"
+      m_TabReponse["500"]		= "<html><body>Erreur 500 : Erreur interne du serveur RaaD.</body></html>"
       
       // --- MAPPING DES EXTENSIONS (MIME TYPES) ---
       // Tu peux également charger ça depuis un "extensions.conf" si tu veux que ce soit dynamique
       LOCAL
-      //Nous allons initialiser les extensions avec leurs paramètres respectifs.
-      a_param est une chaîne = [
-      Content-Type:%1
-      Cache-Control:%2
+      	sModeleHeader est une chaîne = [
+            Content-Type: %1
+            Cache-Control: %2
       ]
+      // HTML
+      m_TabExtensions[".html"]		= ChaîneConstruit(sModeleHeader, "text/html; charset=UTF-8", "no-cache")
+      // JSON
+      m_TabExtensions[".json"]		= ChaîneConstruit(sModeleHeader, "application/json; charset=UTF-8", "no-cache")
+      // CSS
+      m_TabExtensions[".css"]			= ChaîneConstruit(sModeleHeader, "text/css", "max-age=31536000")
+      // JS
+      m_TabExtensions[".js"]			= ChaîneConstruit(sModeleHeader, "application/javascript", "max-age=31536000")
       
-      a_listeextentions est une chaîne = fChargeBuffer(m_RepConfiguration + ["\"]+"extensions.conf")
-      TableauSupprimeTout(m_TabExtensions)
-      
-      POUR TOUTE CHAÎNE a_extension DE a_listeextentions SÉPARÉE PAR RC
-      	
-      	m_TabExtensions[a_extension[[ À Position(a_extension,";")-1]]] = ChaîneConstruit(a_param,a_extension[[Position(a_extension,";")+1 À Position(a_extension,";",0,DepuisFin)-1]] , a_extension[[Position(a_extension,";",0,DepuisFin)+1 À ]])
-      	
-      FIN
-      //-------------------------------------------------------------------------
      type : 458752
+  properties :
    -
-     name : _ParserFichierConf
-     procedure_id : 1889652449076653316
-     type_code : 12
-     code : |1+
-      
-      // Méthode : _ParserFichierConf
-      // But : Lit le fichier et peuple un tableau associatif passé en paramètre
-      //-------------------------------------------------------------------------
-      
-      procédure privée _ParserFichierConf(tabCible est un tableau associatif de chaînes)
-      SI PAS fFichierExiste(m_RepConfiguration + ["\"]+"config.conf") ALORS
-      	m_journal.LogErreur("Fichier de configuration introuvable : " + m_RepConfiguration + ["\"]+"config.conf")
-      	RETOUR
-      FIN
-      
-      sContenu								est une chaîne	= fChargeTexte(m_RepConfiguration + ["\"]+"config.conf")
-      sLigne, sSectionCourante, sCle, sValeur	sont des chaînes
-      sSectionCourante = "General"
-      
-      // On nettoie le tableau cible avant de le remplir
-      TableauSupprimeTout(tabCible)
-      
-      POUR TOUTE CHAÎNE sLigne DE sContenu SÉPARÉE PAR RC
-      	sLigne = SansEspace(sLigne)
-      	SI sLigne = "" OU Gauche(sLigne, 1) = ";" ALORS CONTINUER
-      	
-      	SI Gauche(sLigne, 1) = "[" ET Droite(sLigne, 1) = "]" ALORS
-      		sSectionCourante = Milieu(sLigne, 2, Taille(sLigne) - 2)
-      		CONTINUER
-      	FIN
-      	
-      	nPosition est un entier = Position(sLigne, "=")
-      	SI nPosition > 0 ALORS
-      		sCle									= SansEspace(Gauche(sLigne, nPosition - 1))
-      		sValeur									= SansEspace(Milieu(sLigne, nPosition + 1))
-      		tabCible[sSectionCourante + "." + sCle]	= sValeur
-      	FIN
-      FIN
-     type : 458752
-   -
-     name : LireParametre
-     procedure_id : 1889386826827332091
-     type_code : 12
-     code : |1-
-      
-      //-------------------------------------------------------------------------
-      // Méthode : LireParametre (Thread-Safe Lecture)
-      //-------------------------------------------------------------------------
-      
-      procédure publique LireParametre(LOCAL a_section est une chaîne, LOCAL a_cle est une chaîne, LOCAL a_valeurDefaut est une chaîne = "") : chaîne
-      sCleCible est une chaîne = a_section + "." + a_cle
-      
-      sResultat est une chaine = m_Parametres[sCleCible]
-      
-      SI sResultat <> "" ALORS RENVOYER sResultat
-      RENVOYER a_valeurDefaut
-     type : 458752
+     name : ObtenirRepertoireProjet
+     identifier : 0x1a85a30a001c73b2
+     type_code : 103
+     p_codes :
+      -
+        code : |1+
+         procédure publique ObtenirRepertoireProjet()
+         
+        type : 1966080
+      -
+        code : |1+
+         procédure publique ObtenirRepertoireProjet(Valeur)
+         
+        type : 2031616
+     template_refs : []
   procedure_templates : []
   property_templates : []
  code_parameters :
