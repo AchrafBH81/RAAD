@@ -1,0 +1,374 @@
+#To edit and compare internal_properties, use WINDEV integrated tools.
+#Internal properties refer to the properties of controls in windows, reports, etc.
+info :
+ name : CLGestionnaireSSL
+ major_version : 25
+ minor_version : 0
+ type : 4
+ description : ""
+ subtype : 0
+class :
+ identifier : 0x1a876b8b000ea8eb
+ internal_properties : BQAAAAUAAAB2/vstTMCJbS/hlxjFxirSqKvCUuv8YxgpWyl7S3iA
+ code_elements :
+  type_code : 10
+  p_codes :
+   -
+     code : |1+
+      CLGestionnaireSSL est une Classe
+      	
+      	// ==============================================================================
+      	// MEMBRES DE LA CLASSE (PROPRIÉTÉS)
+      	// ==============================================================================
+      	
+      	// Référence vers l'instance de configuration globale en mémoire RAM (Source unique de vérité)
+      	m_Configuration				est CLConfiguration dynamique
+      	
+      	// Référence vers le service de journalisation applicatif
+      	m_Journal					est CLjournalisation dynamique
+      	
+      	// Chemins d'accès aux fichiers du certificat SSL
+      	m_CheminCertificat			est une chaîne
+      	m_CheminClePrivee			est une chaîne
+      	m_CheminRepertoireSSL		est une chaîne
+      	m_CheminRacineWww			est une chaîne
+      	
+      	// Paramètres de configuration du cycle de vie Let's Encrypt
+      	m_NombreJoursAlerte			est un entier	= 15
+      	m_CourrielContact			est une chaîne	= ""
+      	m_ModeProduction			est un booléen	= Vrai
+      	
+      	// Registre en RAM des jetons de challenge ACME HTTP-01 (Clé : Jeton -> Valeur : Réponse d'autorisation)
+      	m_TableauChallenges			est un tableau associatif de chaînes
+      	
+      	// Verrouillage mémoire pour éviter les exécutions concurrentes de renouvellement
+      	m_RenouvellementEnCours		est un booléen	= Faux
+      	
+      FIN
+     type : 131072
+  procedures :
+   -
+     name : Constructeur
+     procedure_id : 1911614811587717355
+     type_code : 27
+     code : |1+
+      /// <summary>
+      /// Constructeur de la classe CLGestionnaireSSL.
+      /// Initialise les chemins physiques et charge les paramètres de configuration.
+      /// </summary>
+      /// <param name="a_Configuration">Instance active de la configuration globale.</param>
+      /// <param name="a_Journal">Instance active du journal de bord applicatif.</param>
+      PROCÉDURE Constructeur(a_Configuration est CLConfiguration dynamique, a_Journal est CLjournalisation dynamique)
+      
+      // 1. Liaison des dépendances
+      m_Configuration			= a_Configuration
+      m_Journal				= a_Journal
+      
+      // 2. Détermination des chemins physiques
+      m_CheminCertificat		= m_Configuration.m_CheminCertSSL
+      m_CheminClePrivee		= m_Configuration.m_CheminCleSSL
+      m_CheminRepertoireSSL	= ComplèteRep(fExtraitChemin(m_CheminCertificat, fDisque + fRépertoire))
+      m_CheminRacineWww		= ComplèteRep(m_Configuration.m_RepertoireSysteme + "www")
+      
+      // 3. Lecture des options SSL dans la section [serveur] du fichier config.conf
+      m_CourrielContact		= m_Configuration.LireParametreServeur("ContactSSL", "admin@domaine.com")
+      m_NombreJoursAlerte		= Val(m_Configuration.LireParametreServeur("JoursAlerteSSL", "15"))
+      m_ModeProduction		= (Minuscule(m_Configuration.LireParametreServeur("EnvironnementSSL", "production")) = "production")
+      
+      // 4. Création préventive du dossier de stockage des certificats s'il est absent
+      SI PAS fRepExiste(m_CheminRepertoireSSL) ALORS
+      	fRepCrée(m_CheminRepertoireSSL)
+      FIN
+      
+     type : 589824
+   -
+     name : Destructeur
+     procedure_id : 1911614811587782891
+     type_code : 28
+     code : |1+
+      /// <summary>
+      /// Destructeur de la classe CLGestionnaireSSL.
+      /// Libère les ressources et nettoie les tables de hachage en mémoire vive.
+      /// </summary>
+      PROCÉDURE Destructeur()
+      
+      // Libération de la table des challenges ACME
+      SupprimeTout(m_TableauChallenges)
+     type : 655360
+   -
+     name : InitialiserCertificats
+     procedure_id : 1911615962639089017
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Contrôle la validité du certificat actif sur disque au démarrage du serveur.
+      /// Déclenche la création initiale si absent, ou le renouvellement anticipé si la date d'expiration approche.
+      /// </summary>
+      /// <returns>Vrai si un certificat valide est prêt pour l'écoute HTTPS, Faux en cas d'erreur bloquante.</returns>
+      PROCÉDURE InitialiserCertificats() : booléen
+      
+      LOCAL
+      	l_JoursRestants est un entier
+      	
+      // 1. Vérification de l'existence des fichiers PEM sur le disque
+      SI PAS fFichierExiste(m_CheminCertificat) OU PAS fFichierExiste(m_CheminClePrivee) ALORS
+      	SI m_Journal <> Null ALORS
+      		m_Journal.LogErreur("[SSL] Aucun certificat détecté sur le disque. Initialisation de la génération automatique...")
+      	FIN
+      	RENVOYER GenererNouveauCertificat()
+      FIN
+      
+      // 2. Analyse de la date d'expiration via la procédure C# BouncyCastle
+      l_JoursRestants = COL_RAAD.ObtenirJoursRestantsCertificat(m_CheminCertificat)
+      
+      SI l_JoursRestants < 0 ALORS
+      	SI m_Journal <> Null ALORS
+      		m_Journal.LogErreur("[SSL] Le certificat actuel est corrompu ou déjà expiré. Régénération immédiate...")
+      	FIN
+      	RENVOYER GenererNouveauCertificat()
+      SINON SI l_JoursRestants <= m_NombreJoursAlerte ALORS
+      	SI m_Journal <> Null ALORS
+      		m_Journal.LogErreur(ChaîneConstruit("[SSL] Le certificat expire dans %1 jour(s) (Seuil d'alerte : %2 jours). Renouvellement pro-actif...", l_JoursRestants, m_NombreJoursAlerte))
+      	FIN
+      	RENVOYER GenererNouveauCertificat()
+      SINON
+      	SI m_Journal <> Null ALORS
+      		m_Journal.LogErreur(ChaîneConstruit("[SSL] Certificat TLS actif et valide. Expiration dans %1 jour(s).", l_JoursRestants))
+      	FIN
+      	RENVOYER Vrai
+      FIN
+      
+     type : 458752
+   -
+     name : DemarrerSurveillance
+     procedure_id : 1911615979819027846
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Lance un thread d'arrière-plan autonome chargé de contrôler l'expiration du certificat toutes les 24 heures.
+      /// </summary>
+      PROCÉDURE DemarrerSurveillance()
+      
+      // Exécution du thread de fond selon les standards WinDev 25 (threadNormal)
+      ThreadExécute("Thread_Surveillance_SSL", threadNormal, _SurveillerExpirationThread)
+      
+     type : 458752
+   -
+     name : GenererNouveauCertificat
+     procedure_id : 1911616001293935112
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Orchestre la demande et l'émission du certificat multi-domaines (SAN) pour l'ensemble des VHosts.
+      /// </summary>
+      /// <returns>Vrai si l'opération a réussi et que les fichiers PEM sont écrits, Faux sinon.</returns>
+      PROCÉDURE GenererNouveauCertificat() : booléen
+      
+      LOCAL
+      	l_ListeDomainesCsv	est une chaîne
+      	l_ResultatEmission	est un booléen
+      	l_MessageErreur		est une chaîne
+      	
+      // Éviter l'exécution de deux processus de génération simultanés
+      SI m_RenouvellementEnCours ALORS
+      	RENVOYER Faux
+      FIN
+      
+      m_RenouvellementEnCours = Vrai
+      
+      QUAND EXCEPTION DANS
+      	
+      	// 1. Agrégation automatique de tous les domaines déclarés dans les VHosts
+      	l_ListeDomainesCsv = _ExtraireDomainesVHost()
+      	
+      	SI l_ListeDomainesCsv = "" ALORS
+      		SI m_Journal <> Null ALORS
+      			m_Journal.LogErreur("[SSL] Échec : Aucun domaine public valide n'est défini dans la section [vhost].")
+      		FIN
+      		m_RenouvellementEnCours = Faux
+      		RENVOYER Faux
+      	FIN
+      	
+      	SI m_Journal <> Null ALORS
+      		m_Journal.LogErreur(ChaîneConstruit("[SSL] Démarrage de la génération pour les hôtes : %1", l_ListeDomainesCsv))
+      	FIN
+      	
+      	// 2. Appel de la procédure C# autonome BouncyCastle
+      	l_ResultatEmission = COL_RAAD.EmettreCertificatLetsEncrypt(l_ListeDomainesCsv, ...
+      	m_CourrielContact, ...
+      	m_CheminRacineWww, ...
+      	m_CheminCertificat, ...
+      	m_CheminClePrivee, ...
+      	m_ModeProduction)
+      	
+      	SI l_ResultatEmission ALORS
+      		SI m_Journal <> Null ALORS
+      			m_Journal.LogErreur("[SSL] Nouveau certificat TLS et clé privée enregistrés avec succès.")
+      		FIN
+      		m_RenouvellementEnCours = Faux
+      		RENVOYER Vrai
+      	SINON
+      		SI m_Journal <> Null ALORS
+      			m_Journal.LogErreur("[SSL] Échec de l'émission du certificat dans le composant C#.")
+      		FIN
+      		m_RenouvellementEnCours = Faux
+      		RENVOYER Faux
+      	FIN
+      	
+      FAIRE
+      	l_MessageErreur = ExceptionInfo(errComplet)
+      	SI m_Journal <> Null ALORS
+      		m_Journal.LogErreur(ChaîneConstruit("[SSL] Exception critique lors de la génération du certificat : %1", l_MessageErreur))
+      	FIN
+      	m_RenouvellementEnCours = Faux
+      	RENVOYER Faux
+      FIN
+     type : 458752
+   -
+     name : EnregistrerChallenge
+     procedure_id : 1911616022768841722
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Enregistre un challenge ACME HTTP-01 en mémoire vive (RAM) pour une réponse instantanée.
+      /// </summary>
+      /// <param name="a_Jeton">Token fourni par l'autorité de certification.</param>
+      /// <param name="a_ReponseCle">Autorisation cryptographique associée (token.thumbprint).</param>
+      PROCÉDURE EnregistrerChallenge(a_Jeton est une chaîne, a_ReponseCle est une chaîne)
+      
+      m_TableauChallenges[SansEspace(a_Jeton)] = SansEspace(a_ReponseCle)
+      
+     type : 458752
+   -
+     name : NettoyerChallenge
+     procedure_id : 1911616039948715625
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Supprime un challenge ACME validé de la mémoire vive pour libérer les ressources.
+      /// </summary>
+      /// <param name="a_Jeton">Nom du jeton à retirer.</param>
+      PROCÉDURE NettoyerChallenge(a_Jeton est une chaîne)
+      
+      LOCAL
+      	l_JetonNettoye est une chaîne = SansEspace(a_Jeton)
+      	
+      SI m_TableauChallenges[l_JetonNettoye]..Existe ALORS
+      	Supprime(m_TableauChallenges, l_JetonNettoye)
+      FIN
+      
+     type : 458752
+   -
+     name : ObtenirReponseChallenge
+     procedure_id : 1911616482330449628
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Retourne la réponse cryptographique associée à un challenge HTTP-01 demandé par Let's Encrypt.
+      /// </summary>
+      /// <param name="a_Jeton">Jeton extrait de l'URL HTTP entrante.</param>
+      /// <returns>La chaîne d'autorisation ou chaîne vide si inconnu.</returns>
+      PROCÉDURE ObtenirReponseChallenge(a_Jeton est une chaîne) : chaîne
+      
+      LOCAL
+      	l_JetonNettoye est une chaîne = SansEspace(a_Jeton)
+      	
+      SI m_TableauChallenges[l_JetonNettoye]..Existe ALORS
+      	RENVOYER m_TableauChallenges[l_JetonNettoye]
+      SINON
+      	RENVOYER ""
+      FIN
+      
+     type : 458752
+   -
+     name : _SurveillerExpirationThread
+     internal_properties : BQAAAAUAAAC36WuqcstixYeekZFFt2JdU9XOw9dAWudq1PIGJPRgg7QiDRZR8Vs+CLq/qraqkVYy7UKnjXEXljU1SQNIC4SVT58AOuNT+srYlh2cO9/cr992cFAnLVoBYkdnTS6ZF6u8tLgFFLQPdHISAcTz0nR5511rDbCPBdkcOaoWX/fpARBWyni6GRTA5ieTc39y8S2ccsBGoKSfDIuPuJlFtjrdLlv2wFnSzWdSnCODF4NEV0RYs/w7WrDdHo/BcJLnUrOB+wSXvybHT2x1YzBX4srC6HEUTuDwl37HG5vTnIobPIyEbinZbB1BVwLIaP1Kv7HE+zRoc5LZIPfjMt1+VvAVlW6TBPA=
+     procedure_id : 1911616499510388286
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Méthode exécutée dans un thread indépendant. Vérifie l'état du certificat toutes les 24h.
+      /// </summary>
+      PROCÉDURE PRIVÉE _SurveillerExpirationThread()
+      
+      LOCAL
+      	l_JoursRestants est un entier
+      	
+      BOUCLE
+      	// Pause de 24 heures (8 640 000 centièmes de seconde / 86 400 000 ms)
+      	Multitâche(8640000)
+      	
+      	QUAND EXCEPTION DANS
+      		l_JoursRestants = COL_RAAD.ObtenirJoursRestantsCertificat(m_CheminCertificat)
+      		
+      		SI l_JoursRestants <= m_NombreJoursAlerte ALORS
+      			SI m_Journal <> Null ALORS
+      				m_Journal.LogErreur(ChaîneConstruit("[SSL-Tâche] Déclenchement automatique du renouvellement (%1 jour(s) restants).", l_JoursRestants))
+      			FIN
+      			GenererNouveauCertificat()
+      		FIN
+      	FAIRE
+      		// Traitement silencieux pour ne jamais crasher le thread de surveillance
+      	FIN
+      FIN
+      
+     type : 458752
+   -
+     name : _ExtraireDomainesVHost
+     procedure_id : 1911616516690327225
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Parcourt la collection des VHosts en RAM et génère une liste CSV sans doublons ni adresses locales.
+      /// </summary>
+      /// <returns>Chaîne CSV des domaines (ex: "mondomaine.com,api.mondomaine.com").</returns>
+      PROCÉDURE PRIVÉE _ExtraireDomainesVHost() : chaîne
+      
+      LOCAL
+      	l_NomHoteCourant		est une chaîne
+      	l_TableauDomaines		est un tableau de chaînes
+      	l_ChaineResultat		est une chaîne	= ""
+      	l_Indice				est un entier
+      	
+      // 1. Itération sur les hôtes configurés dans le dictionnaire VHost
+      POUR TOUT l_NomHoteCourant DE m_Configuration.m_ParametresVHost
+      	
+      	l_NomHoteCourant = Minuscule(SansEspace(l_NomHoteCourant))
+      	
+      	// Exclusion des hôtes locaux et adresses réservées
+      	SI l_NomHoteCourant = "" OU ...
+      		l_NomHoteCourant						= "localhost" OU ...
+      		l_NomHoteCourant						= "127.0.0.1" OU ...
+      		Position(l_NomHoteCourant, "192.168.")	= 1 OU ...
+      		Position(l_NomHoteCourant, "10.")		= 1 ALORS
+      		CONTINUER
+      	FIN
+      	
+      	// Dédoublonnage
+      	SI TableauCherche(l_TableauDomaines, tcLinéaire, l_NomHoteCourant) = -1 ALORS
+      		TableauAjoute(l_TableauDomaines, l_NomHoteCourant)
+      	FIN
+      FIN
+      
+      // 2. Concaténation au format CSV délimité par des virgules
+      POUR l_Indice = 1 À TableauOccurrence(l_TableauDomaines)
+      	SI l_ChaineResultat <> "" ALORS
+      		l_ChaineResultat += ","
+      	FIN
+      	l_ChaineResultat += l_TableauDomaines[l_Indice]
+      FIN
+      
+      RENVOYER l_ChaineResultat
+      
+     type : 458752
+  procedure_templates : []
+  property_templates : []
+ code_parameters :
+  internal_properties : BQAAAAUAAAA6ih3UbgNXHwTtiPSFUEj+2fi/m7v4QV2rqidAupM=
+  original_name : Classe1
+resources :
+ string_res :
+  identifier : 0x1a876b85000b91b9
+  internal_properties : BQAAAAUAAAAnMYFQ1bL/vz9ehh7L22SNNSlIzGTOI8h5F/WtgDNP
+custom_note :
+ internal_properties : BQAAAAUAAABtB9HWVzrXO2+4NDRVK0vmzaNKrCKqH1DBX30lMmGZ

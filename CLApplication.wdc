@@ -27,6 +27,7 @@ class :
       	m_Base							est CLBase dynamique  
       	m_CodeReponse					est un tableau associatif de buffers 
       	m_MonitoringServeur				est un CLMonitoring
+      	m_GestionnaireSSL				est CLGestionnaireSSL dynamique
       fin
       
      type : 131072
@@ -63,24 +64,24 @@ class :
       // ==============================================================================
       PROCÉDURE MessageRecu(a_SocketRecu est CLCanalSocket)
       
-      // 1. Début du chronomètre pour le calcul de la latence
       l_DateHeureDebut est une DateHeure = DateHeureSys()
-      
-      // 2. Notification de connexion socket active
       m_MonitoringServeur:IncrementerSocketsActifs()
       
-      // 3. Décodage et parsing initial des entêtes et de l'URL
       a_SocketRecu:AnalyserRequete()
       
       LOCAL
       	l_UriDemande est une chaîne = a_SocketRecu:m_UrlRecue
       	
       	// ==============================================================================
-      	// AIGUILLAGE DU ROUTEUR (Compatible WinDev 25)
+      	// ROUTAGE DES REQUÊTES (Compatible WinDev 25)
       	// ==============================================================================
       	
-      // Route 1 : API Métriques de Supervision RaaD Ops
-      SI Position(l_UriDemande, "api/v1/monitoring/systeme", 1, SansCasse) = 1 ALORS
+      // Route 0 : Validation automatique du Challenge ACME Let's Encrypt (Priorité Absolue)
+      SI Position(l_UriDemande, ".well-known/acme-challenge/", 1, SansCasse) = 1 ALORS
+      	_TraiterRequeteAcmeChallenge(a_SocketRecu)
+      	
+      	// Route 1 : API Métriques de Supervision RaaD Ops
+      SINON SI Position(l_UriDemande, "api/v1/monitoring/systeme", 1, SansCasse) = 1 ALORS
       	_TraiterRequeteMonitoring(a_SocketRecu)
       	
       	// Route 2 : ORM et Données REST
@@ -95,25 +96,20 @@ class :
       SINON SI Position(l_UriDemande, "api/v1/memoire", 1, SansCasse) = 1 ALORS
       	_GetMemory(a_SocketRecu)
       	
-      	// Route 5 : Fichiers statiques WWW (index.html, dashboard, js, css)
+      	// Route 5 : Fichiers statiques WWW
       SINON
       	_ObtenirFichier(a_SocketRecu)
       FIN
       
-      // 4. Envoi final de la réponse construite au client TCP
       a_SocketRecu:GenererReponse()
       
-      // 5. Calcul précis de la latence d'exécution
       l_DureeEcoulee	est une Durée	= DateHeureSys() - l_DateHeureDebut
       l_LatenceMs		est un réel		= l_DureeEcoulee..EnMillisecondes
-      
-      // 6. Extraction du code statut numérique (ex: "200 OK" -> 200, "500 Internal Error" -> 500)
       l_CodeStatut	est un entier	= Val(a_SocketRecu:m_CodeReponse)
       SI l_CodeStatut = 0 ALORS
       	l_CodeStatut = 200
       FIN
       
-      // 7. Enregistrement des métriques dans le moteur de monitoring
       m_MonitoringServeur:EnregistrerRequete(l_CodeStatut, l_LatenceMs)
       m_MonitoringServeur:DecrementerSocketsActifs()
      type : 458752
@@ -146,27 +142,31 @@ class :
       
       procédure PRIVÉE _Init()
       
+      // 1. Initialisation de la Journalisation
+      m_Journal			= allouer un CLjournalisation
       
-      // 2. Initialisation du service de Log (Nécessite le répertoire Log de la structure)
-      m_Journal				= new CLjournalisation
-      // Imaginons une méthode d'initialisation pour le log
-      // m_journal.Initialiser(m_structureProjet.P_RepLog())
+      // 2. Initialisation de la Configuration (source unique de vérité)
+      m_Configuration		= allouer un CLConfiguration(fRepExe() + "\conf\config.conf")
       
+      // 3. Initialisation du Monitoring
+      m_MonitoringServeur	= allouer un CLMonitoring("C:")
       
-      // Remplacement du lecteur INI
-      m_Configuration		= allouer un CLConfiguration(frepexe() + "\conf\config.conf")
-      m_MonitoringServeur = allouer un CLMonitoring("C:")
-      // Initialisation de la BDD
-      m_Base = allouer un CLBase
-      m_Base.Initialisation(m_Configuration, m_Journal) 
+      // 4. Initialisation de la Base de Données HFSQL
+      m_Base				= allouer un CLBase
+      m_Base.Initialisation(m_Configuration, m_Journal)
       
-      // Configuration du Serveur
+      // 5. Initialisation et Vérification Proactive des Certificats SSL Let's Encrypt
+      m_GestionnaireSSL = allouer un CLGestionnaireSSL(m_Configuration, m_Journal)
+      m_GestionnaireSSL.InitialiserCertificats()
+      m_GestionnaireSSL.DemarrerSurveillance()
+      
+      // 6. Configuration et Démarrage du Socket Serveur
       m_ServeurSocket								= allouer un CLServeurSocket
       m_ServeurSocket.m_ProcedureRappel			= MessageRecu
       m_ServeurSocket.P_PortSocket				= Val(m_Configuration.LireParametreServeur("Port", "8080"))
       m_ServeurSocket.P_CheminPhpCgi				= m_Configuration.LireParametreServeur("CheminPhpCgi", "")
-      m_ServeurSocket.p_NomSocketEcoute			= m_Configuration.LireParametreServeur("NameServer","SocketRaaD")
-      m_ServeurSocket.P_CLconfiguration           = m_Configuration
+      m_ServeurSocket.p_NomSocketEcoute			= m_Configuration.LireParametreServeur("NameServer", "SocketRaaD")
+      m_ServeurSocket.P_CLconfiguration			= m_Configuration
      type : 458752
    -
      name : _LireEnregistrement
@@ -467,6 +467,39 @@ class :
       	a_SocketRecu:m_CodeReponse		= "500 Internal Server Error"
       	a_SocketRecu:m_ContenuBuffer	= "{""erreur"": ""Impossible de générer la télémétrie système.""}"
       	a_SocketRecu:m_Extension		= ".json"
+      FIN
+      
+     type : 458752
+   -
+     name : _TraiterRequeteAcmeChallenge
+     procedure_id : 1911593173555071509
+     type_code : 12
+     code : |1+
+      /// Répond instantanément en mémoire vive aux requêtes HTTP de validation Let's Encrypt.
+      PROCÉDURE PRIVÉE _TraiterRequeteAcmeChallenge(a_SocketRecu est CLCanalSocket)
+      
+      LOCAL
+      	l_JetonACME		est une chaîne
+      	l_ReponseCle	est une chaîne
+      	
+      // Extraction du token situé après "/.well-known/acme-challenge/"
+      l_JetonACME = a_SocketRecu.m_UrlRecue[[Position(a_SocketRecu.m_UrlRecue, "acme-challenge/", 1, SansCasse) + 15 À]]
+      
+      // Nettoyage des éventuels paramètres de requête (query string)
+      SI Position(l_JetonACME, "?") > 0 ALORS
+      	l_JetonACME = Gauche(l_JetonACME, Position(l_JetonACME, "?") - 1)
+      FIN
+      
+      l_ReponseCle = m_GestionnaireSSL.ObtenirReponseChallenge(l_JetonACME)
+      
+      SI l_ReponseCle <> "" ALORS
+      	a_SocketRecu.m_CodeReponse		= "200 OK"
+      	a_SocketRecu.m_ContenuBuffer	= l_ReponseCle
+      	a_SocketRecu.m_Extension		= ".txt"
+      SINON
+      	a_SocketRecu.m_CodeReponse		= "404 Not Found"
+      	a_SocketRecu.m_ContenuBuffer	= "Challenge introuvable."
+      	a_SocketRecu.m_Extension		= ".txt"
       FIN
       
      type : 458752

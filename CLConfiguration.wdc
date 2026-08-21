@@ -56,8 +56,8 @@ class :
       m_RepertoireRacineExe	= ComplèteRep(fRepExe())
       m_RepertoireProjects	= ComplèteRep(m_RepertoireRacineExe + "Projects")
       m_RepertoireSysteme		= ComplèteRep(m_RepertoireRacineExe + "Systeme")
-      m_CheminCertSSL		= m_RepertoireSysteme+"\SSl\cert.pem"
-      m_CheminCleSSL		= m_RepertoireSysteme+"\SSl\key.pem"
+      m_CheminCertSSL		= m_RepertoireSysteme+"SSl\cert.pem"
+      m_CheminCleSSL		= m_RepertoireSysteme+"SSl\key.pem"
       
       
       

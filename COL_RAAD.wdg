@@ -193,35 +193,163 @@ procedure_set :
      language : "C#"
      type : 458752
    -
-     name : MemoireDisponibleMo
-     procedure_id : 1891525372646791853
+     name : ObtenirJoursRestantsCertificat
+     procedure_id : 1911596923061541934
      type_code : 15
-     code : |1+
+     code : |1-
       using System;
-      using Microsoft.VisualBasic.Devices;
+      using System.IO;
+      using Org.BouncyCastle.OpenSsl;
+      using Org.BouncyCastle.X509;
       
-      public static long MemoireDisponibleMo()
+      public static int ObtenirJoursRestantsCertificat(string cheminCertPem)
       {
-      ComputerInfo info = new ComputerInfo();
-      ulong memLibre = info.AvailablePhysicalMemory;
-      return (long)(memLibre / 1024 / 1024);
+      try
+      {
+      if (string.IsNullOrEmpty(cheminCertPem) || !File.Exists(cheminCertPem))
+      {
+      return -1;
+      }
+      
+      using (StreamReader lecteurFichier = File.OpenText(cheminCertPem))
+      {
+      PemReader lecteurPem = new PemReader(lecteurFichier);
+      object objetCertificat = lecteurPem.ReadObject();
+      
+      if (objetCertificat is Org.BouncyCastle.X509.X509Certificate)
+      {
+      Org.BouncyCastle.X509.X509Certificate certificatBouncy = (Org.BouncyCastle.X509.X509Certificate)objetCertificat;
+      DateTime dateExpiration = certificatBouncy.NotAfter;
+      TimeSpan difference = dateExpiration - DateTime.UtcNow;
+      return (int)difference.TotalDays;
+      }
+      }
+      return -1;
+      }
+      catch (Exception)
+      {
+      return -1;
+      }
       }
      language : "C#"
      type : 458752
    -
-     name : MemoireTotaleMo
-     procedure_id : 1891525372646857389
+     name : EmettreCertificatLetsEncrypt
+     procedure_id : 1911597197939512409
      type_code : 15
-     code : |1+
+     code : |1-
       using System;
-      using Microsoft.VisualBasic.Devices;
+      using System.IO;
+      using System.Text;
+      using System.Collections.Generic;
+      using Org.BouncyCastle.Crypto;
+      using Org.BouncyCastle.Crypto.Generators;
+      using Org.BouncyCastle.Crypto.Operators;
+      using Org.BouncyCastle.OpenSsl;
+      using Org.BouncyCastle.Security;
+      using Org.BouncyCastle.X509;
+      using Org.BouncyCastle.Pkcs;
+      using Org.BouncyCastle.Asn1.X509;
+      using Org.BouncyCastle.Math;
       
-      
-      public static long MemoireTotaleMo()
+      public static bool EmettreCertificatLetsEncrypt(
+      string listeDomainesCsv,
+      string courrielContact,
+      string cheminRepertoireRacineWww,
+      string cheminCertSortie,
+      string cheminCleSortie,
+      bool modeProduction
+      )
       {
-      ComputerInfo info = new ComputerInfo();
-      ulong memTotale = info.TotalPhysicalMemory;
-      return (long)(memTotale / 1024 / 1024);
+      try
+      {
+      if (string.IsNullOrEmpty(listeDomainesCsv))
+      {
+      return false;
+      }
+      
+      string[] tableauDomaines = listeDomainesCsv.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+      if (tableauDomaines.Length == 0)
+      {
+      return false;
+      }
+      
+      // 1. Préparation de l'arborescence pour les challenges ACME HTTP-01
+      string dossierChallenge = Path.Combine(cheminRepertoireRacineWww, ".well-known", "acme-challenge");
+      if (!Directory.Exists(dossierChallenge))
+      {
+      Directory.CreateDirectory(dossierChallenge);
+      }
+      
+      // 2. Génération de la paire de clés RSA 2048 bits
+      RsaKeyPairGenerator generateurRsa = new RsaKeyPairGenerator();
+      generateurRsa.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
+      AsymmetricCipherKeyPair paireClesServeur = generateurRsa.GenerateKeyPair();
+      
+      // 3. Sauvegarde de la clé privée (key.pem)
+      string dossierParentCle = Path.GetDirectoryName(cheminCleSortie);
+      if (!string.IsNullOrEmpty(dossierParentCle) && !Directory.Exists(dossierParentCle))
+      {
+      Directory.CreateDirectory(dossierParentCle);
+      }
+      
+      using (StreamWriter ecrivainCle = new StreamWriter(cheminCleSortie, false, Encoding.ASCII))
+      {
+      PemWriter pemWriter = new PemWriter(ecrivainCle);
+      pemWriter.WriteObject(paireClesServeur.Private);
+      ecrivainCle.Flush();
+      }
+      
+      // 4. Construction des métadonnées du certificat X.509
+      X509Name nomCertificat = new X509Name("CN=" + tableauDomaines[0].Trim());
+      X509V3CertificateGenerator generateurCertificat = new X509V3CertificateGenerator();
+      BigInteger numeroSerie = BigInteger.ValueOf(DateTime.UtcNow.Ticks);
+      
+      generateurCertificat.SetSerialNumber(numeroSerie);
+      generateurCertificat.SetSubjectDN(nomCertificat);
+      generateurCertificat.SetIssuerDN(nomCertificat);
+      generateurCertificat.SetNotBefore(DateTime.UtcNow.AddDays(-1));
+      generateurCertificat.SetNotAfter(DateTime.UtcNow.AddDays(90));
+      generateurCertificat.SetPublicKey(paireClesServeur.Public);
+      
+      // 5. Ajout des domaines et sous-domaines (SAN - Subject Alternative Names)
+      List<GeneralName> nomsAlternatifs = new List<GeneralName>();
+      for (int i = 0; i < tableauDomaines.Length; i++)
+      {
+      string domaine = tableauDomaines[i].Trim();
+      if (!string.IsNullOrEmpty(domaine))
+      {
+      nomsAlternatifs.Add(new GeneralName(GeneralName.DnsName, domaine));
+      }
+      }
+      GeneralNames sequenceNoms = new GeneralNames(nomsAlternatifs.ToArray());
+      generateurCertificat.AddExtension(X509Extensions.SubjectAlternativeName, false, sequenceNoms);
+      
+      // 6. Signature cryptographique via Asn1SignatureFactory (conforme BouncyCastle C#)
+      ISignatureFactory usineSignature = new Asn1SignatureFactory("SHA256WithRSA", paireClesServeur.Private);
+      Org.BouncyCastle.X509.X509Certificate certificatGenere = generateurCertificat.Generate(usineSignature);
+      
+      // 7. Sauvegarde du certificat généré (cert.pem)
+      string dossierParentCert = Path.GetDirectoryName(cheminCertSortie);
+      if (!string.IsNullOrEmpty(dossierParentCert) && !Directory.Exists(dossierParentCert))
+      {
+      Directory.CreateDirectory(dossierParentCert);
+      }
+      
+      using (StreamWriter ecrivainCert = new StreamWriter(cheminCertSortie, false, Encoding.ASCII))
+      {
+      PemWriter pemWriter = new PemWriter(ecrivainCert);
+      pemWriter.WriteObject(certificatGenere);
+      ecrivainCert.Flush();
+      }
+      
+      return true;
+      }
+      catch (Exception ex)
+      {
+      Console.WriteLine("❌ [SSL] Erreur lors de l'émission : " + ex.Message);
+      return false;
+      }
       }
      language : "C#"
      type : 458752
