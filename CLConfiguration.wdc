@@ -27,13 +27,14 @@ class :
       	// MEMBRES DE LA CLASSE (PROPRIÉTÉS)
       	// ==============================================================================
       	
-      	// Chemin absolu vers le fichier de configuration (ex: Exe\Conf\config.conf)
-      	m_NomFichierConfiguration	est une chaîne
-      	
       	// Répertoires racines d'infrastructure
       	m_RepertoireRacineExe		est une chaîne
+      	m_RepertoireConf			est une chaîne
       	m_RepertoireProjects		est une chaîne
       	m_RepertoireSysteme			est une chaîne
+      	
+      	// Chemin absolu vers le fichier de configuration fixé à l'initialisation
+      	m_NomFichierConfiguration	est une chaîne
       	
       	// Tableaux associatifs en RAM pour chaque section
       	m_ParametresServeur			est un tableau associatif de chaînes
@@ -56,19 +57,20 @@ class :
      name : Constructeur
      procedure_id : 1889385748790355878
      type_code : 27
-     code : |1+
-      procédure Constructeur(a_NomFichierConfiguration est une chaîne = "")
+     code : |1-
+      procédure Constructeur()
       
-      // 1. Détermination du répertoire racine d'exécution (Exe\)
+      // 1. Détermination des répertoires d'infrastructure
       m_RepertoireRacineExe	= ComplèteRep(fRepExe())
+      m_RepertoireConf		= ComplèteRep(m_RepertoireRacineExe + "Conf")
       m_RepertoireProjects	= ComplèteRep(m_RepertoireRacineExe + "Projects")
       m_RepertoireSysteme		= ComplèteRep(m_RepertoireRacineExe + "Systeme")
-      m_CheminCertSSL		= m_RepertoireSysteme+"SSl\cert.pem"
-      m_CheminCleSSL		= m_RepertoireSysteme+"SSl\key.pem"
       
+      // 2. Vérification et création préventive des dossiers racines
+      SI PAS fRepExiste(m_RepertoireConf) ALORS
+      	fRepCrée(m_RepertoireConf)
+      FIN
       
-      
-      // 2. Vérification et création préventive des dossiers racines essentiels
       SI PAS fRepExiste(m_RepertoireProjects) ALORS
       	fRepCrée(m_RepertoireProjects)
       FIN
@@ -79,11 +81,10 @@ class :
       	fRepCrée(m_RepertoireSysteme + "www")
       FIN
       
-      // 3. Chargement de la configuration si le chemin est fourni
-      SI a_NomFichierConfiguration <> "" ALORS
-      	m_NomFichierConfiguration = a_NomFichierConfiguration
-      	ChargerConfiguration(m_NomFichierConfiguration)
-      FIN
+      // 3. Ciblage direct du fichier et chargement automatique
+      m_NomFichierConfiguration = m_RepertoireConf + "config.conf"
+      ChargerConfiguration()
+      _ParserFichierConf()
      type : 589824
    -
      name : Destructeur
@@ -111,38 +112,21 @@ class :
       /// <summary>
       /// Charge le fichier de configuration et ventile les données dans les 3 tableaux en mémoire.
       /// </summary>
-      PROCEDURE ChargerConfiguration(a_NomFichierConfiguration est une chaîne = "") : booléen
+      PROCEDURE ChargerConfiguration() : booléen
       
       LOCAL
-      	l_CheminFichier	est une chaîne
-      	l_ContenuTexte	est une chaîne
+      	l_ContenuTexte est une chaîne
       	
-      SI a_NomFichierConfiguration <> "" ALORS
-      	m_NomFichierConfiguration = a_NomFichierConfiguration
-      FIN
-      
-      l_CheminFichier = m_NomFichierConfiguration
-      
       // Sécurité : Vérification de l'existence physique du fichier
-      SI l_CheminFichier = "" OU PAS fFichierExiste(l_CheminFichier) ALORS
-      	renvoyer  Faux
+      SI m_NomFichierConfiguration = "" OU PAS fFichierExiste(m_NomFichierConfiguration) ALORS
+      	RENVOYER Faux
       FIN
       
       // Lecture intégrale du fichier disque
-      l_ContenuTexte = fChargeTexte(l_CheminFichier)
+      l_ContenuTexte = fChargeTexte(m_NomFichierConfiguration)
       SI l_ContenuTexte = "" ALORS
-      	renvoyer  Faux
+      	RENVOYER Faux
       FIN
-      
-      // Réinitialisation des tableaux avant parsing
-      SupprimeTout(m_ParametresServeur)
-      SupprimeTout(m_ParametresBDD)
-      SupprimeTout(m_ParametresVHost)
-      
-      // Parsing ligne par ligne
-      _ParserFichierConf(l_ContenuTexte)
-      _InitTableauxStatiques()
-      renvoyer Vrai
      type : 458752
    -
      name : _ParserFichierConf
