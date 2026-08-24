@@ -15,11 +15,6 @@ class :
   p_codes :
    -
      code : |1-
-      // Structure encapsulant les métadonnées d'une extension de fichier
-      STInfoExtension est une Structure
-      	m_TypeMime		est une chaîne			// Ex: text/css;charset=UTF-8
-      	m_ControleCache	est une chaîne			// Ex: public, max-age=31536000
-      FIN
       
       CLConfiguration est une Classe
       	
@@ -49,7 +44,7 @@ class :
       	m_CheminCleSSL		est une chaîne
       	
       	// Membre de classe : Stockage associatif pour un accès O(1)
-      	m_TabExtensions est un tableau associatif de STInfoExtension
+      	m_TabExtensions est un tableau associatif de chaine
       FIN
      type : 131072
   procedures :
@@ -84,7 +79,8 @@ class :
       // 3. Ciblage direct du fichier et chargement automatique
       m_NomFichierConfiguration = m_RepertoireConf + "config.conf"
       ChargerConfiguration()
-      _ParserFichierConf()
+      ChargerMimeTypes()
+      _InitTableauxStatiques()
      type : 589824
    -
      name : Destructeur
@@ -126,6 +122,8 @@ class :
       l_ContenuTexte = fChargeTexte(m_NomFichierConfiguration)
       SI l_ContenuTexte = "" ALORS
       	RENVOYER Faux
+      sinon
+      	_ParserFichierConf(l_ContenuTexte)
       FIN
      type : 458752
    -
@@ -314,23 +312,6 @@ class :
       m_TabReponse["401"]		= "<html><body>Erreur 401 : Accès non autorisé.</body></html>"
       m_TabReponse["404"]		= "<html><body>Erreur 404 : Ressource introuvable sur le serveur RaaD.</body></html>"
       m_TabReponse["500"]		= "<html><body>Erreur 500 : Erreur interne du serveur RaaD.</body></html>"
-      
-      // --- MAPPING DES EXTENSIONS (MIME TYPES) ---
-      // Tu peux également charger ça depuis un "extensions.conf" si tu veux que ce soit dynamique
-      LOCAL
-      	sModeleHeader est une chaîne = [
-            Content-Type: %1
-            Cache-Control: %2
-      ]
-      // HTML
-      m_TabExtensions[".html"]		= ChaîneConstruit(sModeleHeader, "text/html; charset=UTF-8", "no-cache")
-      // JSON
-      m_TabExtensions[".json"]		= ChaîneConstruit(sModeleHeader, "application/json; charset=UTF-8", "no-cache")
-      // CSS
-      m_TabExtensions[".css"]			= ChaîneConstruit(sModeleHeader, "text/css", "max-age=31536000")
-      // JS
-      m_TabExtensions[".js"]			= ChaîneConstruit(sModeleHeader, "application/javascript", "max-age=31536000")
-      
      type : 458752
    -
      name : ChargerMimeTypes
@@ -338,8 +319,10 @@ class :
      type_code : 12
      code : |1+
       // Résumé : Charge le fichier de configuration des extensions et types MIME en RAM
-      // Syntaxe : ChargerMimeTypes (<a_CheminFichierConf> est chaîne)
-      PROCÉDURE ChargerMimeTypes(a_CheminFichierConf est une chaîne = "")
+      // Syntaxe :
+      //ChargerMimeTypes ()
+      PROCÉDURE ChargerMimeTypes()
+      
       
       LOCAL
       	l_CheminComplet		est une chaîne
@@ -350,28 +333,19 @@ class :
       	l_Extension			est une chaîne
       	l_TypeMime			est une chaîne
       	l_ControleCache		est une chaîne
-      	l_InfoExt			est un STInfoExtension
+      	l_NombreColonnes	est un entier
       	
+      	// CORRECTION 1 : Retrait strict des espaces d'indentation avant les noms d'en-tête
+      	// Ajout d'un espace de norme HTTP après les deux-points
+      	l_InfoExt			est une chaîne	= [
+      Content-Type: %1
+      Cache-Control: %2
+      ]
+      
       // 1. Résolution du chemin absolu du fichier de configuration
-      SI a_CheminFichierConf = "" ALORS
-      	l_CheminComplet = m_RepertoireProjects + "mimetypes.conf"
-      SINON
-      	l_CheminComplet = a_CheminFichierConf
-      FIN
+      l_CheminComplet		= m_RepertoireConf + "mimetypes.conf"
       
-      // 2. Vérification de la présence physique du fichier
-      SI PAS fFichierExiste(l_CheminComplet) ALORS
-      	// Alimentation d'un jeu de secours minimal en dur si le fichier est manquant
-      	_InitialiserMimeTypesSecours()
-      	RETOUR
-      FIN
-      
-      // 3. Lecture intégrale du fichier en mémoire tampon
-      l_ContenuFichier = fChargeTexte(l_CheminComplet)
-      SI l_ContenuFichier = "" ALORS
-      	_InitialiserMimeTypesSecours()
-      	RETOUR
-      FIN
+      l_ContenuFichier	= fChargeTexte(l_CheminComplet)
       
       // 4. Réinitialisation propre du tableau associatif
       SupprimeTout(m_TabExtensions)
@@ -387,10 +361,22 @@ class :
       		CONTINUER
       	FIN
       	
-      	// Extraction des 3 colonnes : .ext;type_mime;cache_control
-      	l_Extension		= Minuscule(SansEspace(ExtraitChaîne(l_LigneCourante, 1, ";")))
-      	l_TypeMime		= SansEspace(ExtraitChaîne(l_LigneCourante, 2, ";"))
-      	l_ControleCache	= SansEspace(ExtraitChaîne(l_LigneCourante, 3, ";"))
+      	// Détection du nombre de colonnes de la ligne active
+      	l_NombreColonnes	= ChaîneOccurrence(l_LigneCourante, ";") + 1
+      	
+      	// Extraction de l'extension
+      	l_Extension			= Minuscule(SansEspace(ExtraitChaîne(l_LigneCourante, 1, ";")))
+      	
+      	// CORRECTION 2 : Aiguillage dynamique selon la présence du charset (4 colonnes) ou non (3 colonnes)
+      	SI l_NombreColonnes >= 4 ALORS
+      		// Fusion du type MIME (Col 2) avec son Charset (Col 3)
+      		l_TypeMime		= SansEspace(ExtraitChaîne(l_LigneCourante, 2, ";")) + "; " + SansEspace(ExtraitChaîne(l_LigneCourante, 3, ";"))
+      		l_ControleCache	= SansEspace(ExtraitChaîne(l_LigneCourante, 4, ";"))
+      	SINON
+      		// Format standard en 3 colonnes (ex: images, documents bureautiques, archives)
+      		l_TypeMime		= SansEspace(ExtraitChaîne(l_LigneCourante, 2, ";"))
+      		l_ControleCache	= SansEspace(ExtraitChaîne(l_LigneCourante, 3, ";"))
+      	FIN
       	
       	// Validation : l'extension et le type MIME doivent être renseignés
       	SI l_Extension <> "" ET l_TypeMime <> "" ALORS
@@ -399,52 +385,10 @@ class :
       			l_Extension = "." + l_Extension
       		FIN
       		
-      		// Remplissage de la structure
-      		l_InfoExt.m_TypeMime			= l_TypeMime
-      		l_InfoExt.m_ControleCache		= (l_ControleCache <> "" ? l_ControleCache SINON "no-cache")
-      		
-      		// Affectation dans le dictionnaire associatif
-      		m_TabExtensions[l_Extension]	= l_InfoExt
+      		// Affectation dans le dictionnaire associatif avec secours sur no-cache
+      		m_TabExtensions[l_Extension] = ChaîneConstruit(l_InfoExt, l_TypeMime, (l_ControleCache <> "" ? l_ControleCache SINON "no-cache"))
       	FIN
       FIN
-      
-     type : 458752
-   -
-     name : _InitialiserMimeTypesSecours
-     procedure_id : 1911782680388832419
-     type_code : 12
-     code : |1+
-      // Résumé : Initialise les types MIME vitaux en dur en cas d'absence du fichier externe
-      PROCÉDURE PRIVÉE _InitialiserMimeTypesSecours()
-      
-      LOCAL
-      	l_InfoExt est un STInfoExtension
-      	
-      SupprimeTout(m_TabExtensions)
-      
-      // HTML
-      l_InfoExt.m_TypeMime		= "text/html;charset=UTF-8"
-      l_InfoExt.m_ControleCache	= "no-cache"
-      m_TabExtensions[".html"]	= l_InfoExt
-      m_TabExtensions[".htm"]		= l_InfoExt
-      
-      // CSS / JS
-      l_InfoExt.m_TypeMime		= "text/css;charset=UTF-8"
-      l_InfoExt.m_ControleCache	= "public, max-age=31536000"
-      m_TabExtensions[".css"]		= l_InfoExt
-      
-      l_InfoExt.m_TypeMime		= "text/javascript;charset=UTF-8"
-      m_TabExtensions[".js"]		= l_InfoExt
-      
-      // JSON
-      l_InfoExt.m_TypeMime		= "application/json;charset=UTF-8"
-      l_InfoExt.m_ControleCache	= "no-cache"
-      m_TabExtensions[".json"]	= l_InfoExt
-      
-      // Octet-stream par défaut
-      l_InfoExt.m_TypeMime		= "application/octet-stream"
-      l_InfoExt.m_ControleCache	= "no-cache"
-      m_TabExtensions[".*"]		= l_InfoExt
       
      type : 458752
    -
@@ -454,11 +398,11 @@ class :
      code : |1+
       // Résumé : Renvoie les métadonnées MIME et Cache associées à une extension donnée
       //[ <Résultat> = ] ObtenirInfoExtension (<a_Extension> est chaîne)
-      PROCÉDURE ObtenirInfoExtension(a_Extension est une chaîne) : STInfoExtension
+      PROCÉDURE ObtenirInfoExtension(a_Extension est une chaîne) : chaîne
       
       LOCAL
       	l_ExtensionNettoyee	est une chaîne
-      	l_InfoResultat		est un STInfoExtension
+      	l_InfoResultat		est un chaine
       	
       // 1. Normalisation de l'extension transmise
       l_ExtensionNettoyee = Minuscule(SansEspace(a_Extension))
@@ -470,24 +414,13 @@ class :
       
       // 2. Recherche O(1) dans le dictionnaire des extensions préchargé
       SI l_ExtensionNettoyee <> "" ET m_TabExtensions[l_ExtensionNettoyee]..Existe ALORS
-      	l_InfoResultat = m_TabExtensions[l_ExtensionNettoyee]
+      	renvoyer  m_TabExtensions[l_ExtensionNettoyee]
       SINON
-      	// 3. Valeurs de repli universelles (Fallback de sécurité)
-      	SELON l_ExtensionNettoyee
-      		CAS ".json":
-      			l_InfoResultat.m_TypeMime		= "application/json;charset=UTF-8"
-      			l_InfoResultat.m_ControleCache	= "no-cache"
-      		CAS ".html", ".htm":
-      			l_InfoResultat.m_TypeMime		= "text/html;charset=UTF-8"
-      			l_InfoResultat.m_ControleCache	= "no-cache"
-      		AUTRE CAS:
-      			// Flux binaire par défaut si extension totalement inconnue ou absente
-      			l_InfoResultat.m_TypeMime		= "application/octet-stream"
-      			l_InfoResultat.m_ControleCache	= "no-cache"
-      	FIN
+      	renvoyer = [
+            Content-Type:application/octet-stream
+            Cache-Control:no-cache
+      	]
       FIN
-      
-      RENVOYER l_InfoResultat
      type : 458752
   properties :
    -
