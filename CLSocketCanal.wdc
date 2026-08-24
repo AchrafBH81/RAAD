@@ -15,6 +15,12 @@ class :
   p_codes :
    -
      code : |1+
+      // Structure encapsulant les métadonnées d'une extension de fichier
+      STInfoExtension est une Structure
+      	m_TypeMime		est une chaîne			// Ex: text/css;charset=UTF-8
+      	m_ControleCache	est une chaîne			// Ex: public, max-age=31536000
+      FIN
+      
       CLCanalSocket est une Classe
       	m_configuration						est CLConfiguration dynamique
       	m_NomSocket							est chaine 
@@ -108,27 +114,58 @@ class :
      procedure_id : 1891211195791215794
      type_code : 12
      code : |1+
-      procédure privée _GenererEnteteReponse()<métier> : chaîne
+      // ==============================================================================
+      // Méthode : _GenererEnteteReponse (CLCanalSocket.wdc)
+      // Rôle    : Génère l'entête HTTP/1.1 complet conforme avec Types MIME et Cache
+      // Version : WinDev 25 (Strict)
+      // ==============================================================================
+      PROCÉDURE PRIVÉE _GenererEnteteReponse() : chaîne
       
-      //génération de l'en-tête de la réponse HTTP
-      l_valeur est une chaîne=[
-      HTTP/1.1 %1
-      Accept-Ranges:bytes
-      Content-Length:%2
-      Server:RaaD 1.2
-      Date:%3
-      Connection:Keep-Alive
-      ]
+      LOCAL
+      	l_InfoExtension		est un STInfoExtension
+      	l_EnteteConstruit	est une chaîne
+      	l_TailleCorps		est un entier
+      	l_CodeStatutHttp	est une chaîne
+      	l_DateHttp			est une chaîne
+      	l_DateHeureActuelle	est une DateHeure
+      	
+      // 1. Détermination du code statut HTTP
+      SI m_CodeReponse = "" ALORS
+      	l_CodeStatutHttp = "200 OK"
+      SINON
+      	l_CodeStatutHttp = m_CodeReponse
+      FIN
       
-      l_DateServeur est une dateheure = DateHeureLocaleVersUTC(DateHeureSys())
+      // 2. Récupération des informations de Type MIME et de Cache via la configuration
+      SI m_Configuration <> Null ALORS
+      	l_InfoExtension = m_Configuration.ObtenirInfoExtension(m_Extension)
+      SINON
+      	// Sécurité de repli si la configuration n'est pas encore injectée
+      	l_InfoExtension.m_TypeMime		= "text/html;charset=UTF-8"
+      	l_InfoExtension.m_ControleCache	= "no-cache"
+      FIN
       
-      l_valeur = ChaîneConstruit(l_valeur,m_CodeReponse,Taille(m_ContenuBuffer), DateVersChaîne(l_DateServeur.PartieDate,"JJ MMM AAAA" )+ " "+HeureVersChaîne(l_DateServeur.PartieHeure,"HH:MM:SS")+" GMT")
-      l_valeur += [RC] + m_configuration.m_TabExtensions[m_Extension]
+      // 3. Calcul précis de la taille du contenu (Buffer binaire ou texte)
+      l_TailleCorps		= Taille(m_ContenuBuffer)
       
-      SI m_Gzip ALORS  l_valeur += [RC] + "Content-Encoding:Gzip"
+      // 4. Formatage de la date HTTP standard en WinDev 25 (DateVersChaîne + HeureVersChaîne)
+      l_DateHeureActuelle	= DateHeureLocaleVersUTC(DateHeureSys())
+      l_DateHttp			= DateVersChaîne(l_DateHeureActuelle.PartieDate, "JJJ, JJ MMM AAAA") + " " + HeureVersChaîne(l_DateHeureActuelle.PartieHeure, "HH:MM:SS") + " GMT"
       
+      // 5. Construction des lignes d'entêtes conformes au standard HTTP/1.1
+      l_EnteteConstruit	= "HTTP/1.1 " + l_CodeStatutHttp + RC
+      l_EnteteConstruit += "Date: " + l_DateHttp + RC
+      l_EnteteConstruit += "Server: RaaD-Server" + RC
+      l_EnteteConstruit += "Content-Type: " + l_InfoExtension.m_TypeMime + RC
+      l_EnteteConstruit += "Cache-Control: " + l_InfoExtension.m_ControleCache + RC
+      l_EnteteConstruit += "Content-Length: " + l_TailleCorps + RC
+      l_EnteteConstruit += "Connection: keep-alive" + RC
+      l_EnteteConstruit += "Access-Control-Allow-Origin: *" + RC
       
-      RENVOYER l_valeur
+      // Ligne vide finale marquant obligatoirement la fin des entêtes HTTP (RFC 7230)
+      l_EnteteConstruit += RC
+      
+      RENVOYER l_EnteteConstruit
       
      type : 458752
    -

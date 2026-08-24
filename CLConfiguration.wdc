@@ -468,37 +468,42 @@ class :
      procedure_id : 1911782804942977914
      type_code : 12
      code : |1+
-      // Résumé : Recherche les métadonnées MIME et Cache associées à une extension
-      // Syntaxe :
-      //[ <Résultat> = ] ObtenirInfoExtension (<a_NomFichierOuExtension> est chaîne)
-      PROCÉDURE ObtenirInfoExtension(a_NomFichierOuExtension est une chaîne) : STInfoExtension
+      // Résumé : Renvoie les métadonnées MIME et Cache associées à une extension donnée
+      //[ <Résultat> = ] ObtenirInfoExtension (<a_Extension> est chaîne)
+      PROCÉDURE ObtenirInfoExtension(a_Extension est une chaîne) : STInfoExtension
       
       LOCAL
       	l_ExtensionNettoyee	est une chaîne
       	l_InfoResultat		est un STInfoExtension
       	
-      // Extraction propre de l'extension
-      l_ExtensionNettoyee = Minuscule(SansEspace(fExtraitChemin(a_NomFichierOuExtension, fExtension)))
+      // 1. Normalisation de l'extension transmise
+      l_ExtensionNettoyee = Minuscule(SansEspace(a_Extension))
       
-      // Si aucune extension n'a été trouvée ou si la chaîne passée était déjà l'extension pure
-      SI l_ExtensionNettoyee = "" ALORS
-      	l_ExtensionNettoyee = Minuscule(SansEspace(a_NomFichierOuExtension))
-      	SI Position(l_ExtensionNettoyee, ".") <> 1 ALORS
-      		l_ExtensionNettoyee = "." + l_ExtensionNettoyee
+      // Si l'extension est fournie sans point initial (ex: "json"), on l'ajoute
+      SI l_ExtensionNettoyee <> "" ET Position(l_ExtensionNettoyee, ".") <> 1 ALORS
+      	l_ExtensionNettoyee = "." + l_ExtensionNettoyee
+      FIN
+      
+      // 2. Recherche O(1) dans le dictionnaire des extensions préchargé
+      SI l_ExtensionNettoyee <> "" ET m_TabExtensions[l_ExtensionNettoyee]..Existe ALORS
+      	l_InfoResultat = m_TabExtensions[l_ExtensionNettoyee]
+      SINON
+      	// 3. Valeurs de repli universelles (Fallback de sécurité)
+      	SELON l_ExtensionNettoyee
+      		CAS ".json":
+      			l_InfoResultat.m_TypeMime		= "application/json;charset=UTF-8"
+      			l_InfoResultat.m_ControleCache	= "no-cache"
+      		CAS ".html", ".htm":
+      			l_InfoResultat.m_TypeMime		= "text/html;charset=UTF-8"
+      			l_InfoResultat.m_ControleCache	= "no-cache"
+      		AUTRE CAS:
+      			// Flux binaire par défaut si extension totalement inconnue ou absente
+      			l_InfoResultat.m_TypeMime		= "application/octet-stream"
+      			l_InfoResultat.m_ControleCache	= "no-cache"
       	FIN
       FIN
       
-      // Recherche O(1) dans le tableau associatif
-      SI m_TabExtensions[l_ExtensionNettoyee]..Existe ALORS
-      	l_InfoResultat = m_TabExtensions[l_ExtensionNettoyee]
-      SINON
-      	// Valeurs de repli universelles
-      	l_InfoResultat.m_TypeMime		= "application/octet-stream"
-      	l_InfoResultat.m_ControleCache	= "no-cache"
-      FIN
-      
       RENVOYER l_InfoResultat
-      
      type : 458752
   properties :
    -
