@@ -81,6 +81,8 @@ class :
       ChargerConfiguration()
       ChargerMimeTypes()
       _InitTableauxStatiques()
+      m_CheminCertSSL= m_RepertoireSysteme +"\SSL\cert.pem"
+      m_CheminCleSSL =  m_RepertoireSysteme +"\SSL\key.pem"
      type : 589824
    -
      name : Destructeur

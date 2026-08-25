@@ -408,9 +408,9 @@ class :
       	l_CheminPur = a_SocketRecu.m_UrlRecue
       FIN
       
-      a_SocketRecu.m_Parametres["espace"]	= ExtraitChaîne(l_CheminPur, 4, "/")
-      a_SocketRecu.m_Parametres["table"]	= ExtraitChaîne(l_CheminPur, 5, "/")
-      a_SocketRecu.m_Parametres["valkey"]	= ExtraitChaîne(l_CheminPur, 6, "/")
+      
+      a_SocketRecu.m_Parametres["table"]	= ExtraitChaîne(l_CheminPur, 4, "/")
+      a_SocketRecu.m_Parametres["valkey"]	= ExtraitChaîne(l_CheminPur, 5, "/")
       
       // =================================================================================
       // 2. CONTRÔLEUR REST (Évaluation directe de l'objet)
