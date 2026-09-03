@@ -397,71 +397,62 @@ class :
      type_code : 12
      code : |1-
       PROCÉDURE PRIVÉE _TraiterRequeteApi(a_SocketRecu est un CLCanalSocket)
+      // =================================================================================
+      // 1. EXTRACTION ET INJECTION DIRECTE (Zéro variable locale allouée)
+      // Segments d'URL : 2:"api", 3:"v1", 4:"data", 5:{espace}, 6:{table}, 7:{valkey}
+      // =================================================================================
       
-      LOCAL
-      	l_CheminPur				est une chaîne
-      	l_QueryString			est une chaîne	= ""
-      	l_NomTable				est une chaîne
-      	l_Identifiant			est une chaîne
-      	l_PositionSeparateur	est un entier
-      	
-      // 1. Découpage propre entre le chemin URI et la Query String (?ids=... ou ?rubrique=...)
-      l_PositionSeparateur = Position(a_SocketRecu.m_UrlRecue, "?")
-      SI l_PositionSeparateur > 0 ALORS
-      	l_CheminPur		= Gauche(a_SocketRecu.m_UrlRecue, l_PositionSeparateur - 1)
-      	l_QueryString	= Milieu(a_SocketRecu.m_UrlRecue, l_PositionSeparateur + 1)
+      l_CheminPur       est une chaîne
+      
+      SI Position(a_SocketRecu.m_UrlRecue, "?") > 0 ALORS
+      	// Le '?' existe : on extrait strictement ce qui se trouve à sa gauche
+      	l_CheminPur = Gauche(a_SocketRecu.m_UrlRecue, Position(a_SocketRecu.m_UrlRecue, "?") - 1)
       SINON
+      	// Pas de paramètres : le chemin pur est l'URL complète
       	l_CheminPur = a_SocketRecu.m_UrlRecue
       FIN
       
-      // Extraction des segments : Segment 4 = Table, Segment 5 = ID Optionnel
-      // Ex: "api/v1/data/WBTierce" -> Table="WBTierce", ID=""
-      // Ex: "api/v1/data/WBTierce/42" -> Table="WBTierce", ID="42"
-      l_NomTable		= ExtraitChaîne(l_CheminPur, 4, "/")
-      l_Identifiant	= ExtraitChaîne(l_CheminPur, 5, "/")
       
-      SI l_NomTable = "" OU l_NomTable = EOT ALORS
-      	a_SocketRecu.m_CodeReponse				= "400 Bad Request"
-      	a_SocketRecu.m_ContenuBuffer			= "{""erreur"": ""Nom de ressource/table manquant dans l'URI.""}"
-      	a_SocketRecu.m_TypeContenuPersonnalise	= "application/json; charset=utf-8"
-      	RETOUR
-      FIN
+      a_SocketRecu.m_Parametres["table"]		= ExtraitChaîne(l_CheminPur, 4, "/")
+      a_SocketRecu.m_Parametres["valkey"]		= ExtraitChaîne(l_CheminPur, 5, "/")
       
-      a_SocketRecu.m_Parametres["table"]		= l_NomTable
-      a_SocketRecu.m_Parametres["valeur_cle"]	= (l_Identifiant = EOT ? "" SINON l_Identifiant)
+      // =================================================================================
+      // 2. CONTRÔLEUR REST (Évaluation directe de l'objet)
+      // =================================================================================
       
-      // 2. Aiguillage selon le verbe HTTP
-      SELON a_SocketRecu.m_TypeRequete
-      	CAS "GET":
-      		SI a_SocketRecu.m_Parametres["valeur_cle"] <> "" ALORS
-      			// GET /table/{id} -> Renvoie strictement un OBJET JSON {}
-      			_LireEnregistrementUnitaire(a_SocketRecu)
-      		SINON
-      			// GET /table ou GET /table?ids=1,2,3 -> Renvoie strictement un TABLEAU JSON []
-      			_LireEnregistrementsCollection(a_SocketRecu, l_QueryString)
-      		FIN
-      		
-      	CAS "POST":
-      		// POST /table -> Création unitaire (Objet) ou insertion multiple (Tableau)
-      		_CreerEnregistrements(a_SocketRecu)
-      		
-      	CAS "PUT":
-      		SI a_SocketRecu.m_Parametres["valeur_cle"] <> "" ALORS
-      			// PUT /table/{id} -> Modification unitaire stricte
-      			_ModifierEnregistrementUnitaire(a_SocketRecu)
-      		SINON
-      			// PUT /table -> Modification par lot (Reçoit un tableau JSON d'objets)
-      			_ModifierEnregistrementsLot(a_SocketRecu)
-      		FIN
-      		
-      	CAS "DELETE":
-      		// DELETE /table/{id} ou DELETE /table?ids=1,2,3
-      		_SupprimerEnregistrements(a_SocketRecu, l_QueryString)
-      		
-      	AUTRE CAS:
-      		a_SocketRecu.m_CodeReponse				= "405 Method Not Allowed"
-      		a_SocketRecu.m_ContenuBuffer			= "{""erreur"": ""Verbe HTTP non supporté sur cette ressource.""}"
-      		a_SocketRecu.m_TypeContenuPersonnalise	= "application/json; charset=utf-8"
+      QUAND EXCEPTION DANS
+      	
+      	
+      	SELON a_SocketRecu.m_TypeReq
+      		CAS "GET" :
+      			// On lit directement le paramètre fraîchement assigné
+      			SI a_SocketRecu.m_Parametres["valkey"] = "" Ou  a_SocketRecu.m_Parametres["valkey"] = eot ALORS
+      				_LireEnregistrements(a_SocketRecu)
+      			SINON
+      				_LireEnregistrement(a_SocketRecu)
+      			FIN
+      			
+      		CAS "POST" :
+      			_CreerEnregistrement(a_SocketRecu)
+      			
+      		CAS "PUT" :
+      			_ModifierEnregistrement(a_SocketRecu)
+      			
+      		CAS "DELETE" :
+      			_SupprimerEnregistrement(a_SocketRecu)
+      			
+      		AUTRE CAS :
+      			// Protection standardisée si le verbe HTTP n'est pas supporté
+      			a_SocketRecu.m_CodeReponse = "405 Method Not Allowed"
+      	FIN
+      	
+      FAIRE
+      	// Capture silencieuse de l'exception, journalisation et retour propre 500 au client
+      	// Remplace CLLog par ta classe de journalisation si nécessaire
+      	
+      	
+      	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
+      	a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Une erreur interne est survenue lors du routage de la requête.""}"
       FIN
      type : 458752
    -

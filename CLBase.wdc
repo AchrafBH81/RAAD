@@ -155,10 +155,10 @@ class :
       Connexion()
       
       si L_EnregistrementCourant.m_valkey <> "" ALORS
-      	HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_table, L_EnregistrementCourant.m_key + " = " + L_EnregistrementCourant.m_valkey ))
+      	HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_NomTable, L_EnregistrementCourant.m_key + " = " + L_EnregistrementCourant.m_valkey ))
       	
       sinon
-      	HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_table, L_EnregistrementCourant.m_condition ))	
+      	HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_NomTable, L_EnregistrementCourant.m_condition ))	
       FIN
       
       // lire le premier enregistrement  

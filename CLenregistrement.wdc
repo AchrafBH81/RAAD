@@ -17,14 +17,16 @@ class :
      code : |1+
       CLEnregistrement est une Classe
       	m_base						est un  CLBase
-      	m_table						est une chaîne
       	m_condition					est une chaîne 
       	m_erreur					est une chaîne 
-      	m_json						est une chaîne
-      	m_key						est une chaine
-      	m_valkey					est une chaine  
-      	m_RequeteSQL				est une chaine  
-      		
+      	m_json						est une chaîne	// Représentation JSON de l'entité active 
+      	m_RequeteSQL				est une chaine	// Dernier code SQL exécuté par l'instance
+      	m_NomTable					est une chaîne	// Nom physique de la table / fichier HFSQL manipulé
+      	m_CleUnique					est une chaîne	// Nom de la colonne constituant la clé primaire unique identifiée
+      	m_ValeurCle					est une chaîne	// Valeur active de la clé primaire de l'enregistrement chargé
+      	
+      	
+      
       fin
       
      type : 131072
@@ -57,10 +59,10 @@ class :
       
       // Extraction de la structure de la table 
       
-      m_table = a_table
+      m_NomTable = a_table
       indrub est un entier
       
-      l_ResRub est une chaîne = HListeClé(m_table,hLstDétailPlus)
+      l_ResRub est une chaîne = HListeClé(m_NomTable,hLstDétailPlus)
       l_nomRub est une chaine  
       
       POUR TOUTE CHAÎNE l_rub DE l_ResRub SEPAREE PAR RC
@@ -70,15 +72,15 @@ class :
       			
       			cas 0 : l_nomRub = l_desRub
       			
-      			cas 4 : SI Val(l_desRub) = 1  ALORS m_key = l_nomRub
+      			cas 4 : SI Val(l_desRub) = 1  ALORS m_CleUnique = l_nomRub
       		FIN
       		
       		 
       		indrub++ 
-      		si indrub = 5 ou m_key <> "" alors sortir 
+      		si indrub = 5 ou m_CleUnique <> "" alors sortir 
       	FIN
       
-      	si m_key <> "" ALORS SORTIR
+      	si m_CleUnique <> "" ALORS SORTIR
       FIN
       //// déclaration dynamique de l'enregistrement 
       //Trace(m_enrg..FichierAssocié)
@@ -110,7 +112,7 @@ class :
      code : |1-
       procédure Charger(local a_valkey est une chaîne, a_condition est une chaîne)
       
-      m_valkey	= a_valkey
+      m_ValeurCle	= a_valkey
       m_condition	= a_condition
       
       LOCAL
@@ -118,10 +120,10 @@ class :
       	L_ResEnregistrement	est un Enregistrement 
       	
       
-      SI m_valkey <> "" ALORS
-      	m_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 where %2" , m_table, m_key + " = " + m_valkey )
+      SI m_ValeurCle <> "" ALORS
+      	m_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 where %2" , m_NomTable, m_CleUnique + " = " + m_ValeurCle )
       SINON
-      	m_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 where %2" , m_table, m_condition ) 
+      	m_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 where %2" , m_NomTable, m_condition ) 
       FIN
       
       m_base.Connexion()
@@ -177,14 +179,14 @@ class :
       l_DonneesJson	= JSONVersVariant(m_json)
       
       // 2. Construction de l'ossature SQL paramétrée
-      m_RequeteSQL	= "UPDATE " + m_table + RC + "SET "
+      m_RequeteSQL	= "UPDATE " + m_NomTable + RC + "SET "
       
       POUR TOUT l_Ligne DE l_DonneesJson
       	
       	// Création d'un nom de paramètre unique (ex: p_Prix)
       	l_NomParametre = "p_" + l_Ligne..Nom
       	
-      	SI l_Ligne..Nom = m_key ALORS
+      	SI l_Ligne..Nom = m_CleUnique ALORS
       		l_ClauseWhere = "WHERE " + l_Ligne..Nom + " = {" + l_NomParametre + "}"
       	SINON
       		// Ajoute automatiquement la virgule si l_CorpsReq n'est pas vide
@@ -225,11 +227,11 @@ class :
      code : |1-
       procédure Creer()
       
-      HRAZ(m_table)
-      {m_table,indFichier} = _JsonVersEnregistrement()
-      HAjoute(m_table,hAffecteParcours)
+      HRAZ(m_NomTable)
+      {m_NomTable,indFichier} = _JsonVersEnregistrement()
+      HAjoute(m_NomTable,hAffecteParcours)
       
-      l_enrg est un Enregistrement = {m_table,indFichier}
+      l_enrg est un Enregistrement = {m_NomTable,indFichier}
       Sérialise(l_enrg,m_json,psdJSON)
       
       
@@ -256,7 +258,7 @@ class :
       
       VariantEnregistrement		est un variant	= JSONVersVariant(m_json)
       NouvelEnregistrement	est un Enregistrement
-      NouvelEnregistrement = {m_table}
+      NouvelEnregistrement = {m_NomTable}
       
       POUR i=1 _a_ VariantEnregistrement..Membre..Occurrence
       	{"E_record."+VariantEnregistrement..Membre[i]..Nom} = VariantEnregistrement..Membre[i]..Valeur 	
@@ -298,22 +300,22 @@ class :
       		
       		SELON l_OperateurSql
       			CAS "contient" :
-      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 LIKE '%3'", m_Table, a_RubriqueFiltre, "%" + a_ValeurFiltre + "%")
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 LIKE '%3'", m_NomTable, a_RubriqueFiltre, "%" + a_ValeurFiltre + "%")
       			CAS "commence" :
-      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 LIKE '%3'", m_Table, a_RubriqueFiltre, a_ValeurFiltre + "%")
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 LIKE '%3'", m_NomTable, a_RubriqueFiltre, a_ValeurFiltre + "%")
       			CAS "termine" :
-      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 LIKE '%3'", m_Table, a_RubriqueFiltre, "%" + a_ValeurFiltre)
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 LIKE '%3'", m_NomTable, a_RubriqueFiltre, "%" + a_ValeurFiltre)
       			CAS "sup" :
-      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 > '%3'", m_Table, a_RubriqueFiltre, a_ValeurFiltre)
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 > '%3'", m_NomTable, a_RubriqueFiltre, a_ValeurFiltre)
       			CAS "inf" :
-      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 < '%3'", m_Table, a_RubriqueFiltre, a_ValeurFiltre)
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 < '%3'", m_NomTable, a_RubriqueFiltre, a_ValeurFiltre)
       			AUTRE CAS :
       				// Égalité stricte par défaut
-      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 = '%3'", m_table, a_RubriqueFiltre, a_ValeurFiltre)
+      				l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2 = '%3'", m_NomTable, a_RubriqueFiltre, a_ValeurFiltre)
       		FIN
       	SINON
       		// Aucun filtre, extraction complète de la ressource
-      		l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1", m_Table)
+      		l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1", m_NomTable)
       	FIN
       	
       	// Exécution SQL dans l'isolation du thread courant
@@ -411,10 +413,10 @@ class :
       
       // 1. Recherche de l'enregistrement en base de données
       // m_NomTable contient le nom de la table, m_CleUnique contient le nom de la clé primaire
-      SI HLitRecherchePremier(m_Table, m_key, a_ValeurCleUnique) ALORS
+      SI HLitRecherchePremier(m_NomTable, m_CleUnique, a_ValeurCleUnique) ALORS
       	
       	// 2. Suppression physique
-      	SI HSupprime(m_table) ALORS
+      	SI HSupprime(m_NomTable) ALORS
       		m_erreur = ""
       	SINON
       		m_erreur = "{""erreur"": ""Impossible de supprimer l'enregistrement : " + HErreurInfo(hErrMessage) + """}"
@@ -445,7 +447,7 @@ class :
       
       // 3. Construction de la requête de suppression en masse
       l_RequeteSQL	= ChaîneConstruit("DELETE FROM %1 WHERE %2 = '%3'", ...
-      m_Table, a_RubriqueFiltre, a_ValeurFiltre)
+      m_NomTable, a_RubriqueFiltre, a_ValeurFiltre)
       
       // 4. Exécution directe de la requête de modification/suppression
       // En WinDev 25, HExécuteRequêteSQL sans Source de Données exécute l'ordre directement en C/S
