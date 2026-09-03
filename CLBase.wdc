@@ -154,8 +154,8 @@ class :
       	
       Connexion()
       
-      si L_EnregistrementCourant.m_valkey <> "" ALORS
-      	HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_NomTable, L_EnregistrementCourant.m_key + " = " + L_EnregistrementCourant.m_valkey ))
+      si L_EnregistrementCourant.m_ValeurCle <> "" ALORS
+      	HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_NomTable, L_EnregistrementCourant.m_CleUnique + " = " + L_EnregistrementCourant.m_ValeurCle ))
       	
       sinon
       	HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_NomTable, L_EnregistrementCourant.m_condition ))	
