@@ -47,10 +47,10 @@ class :
       
       procédure Connexion()
       
-      si pas HOuvreConnexion(m_connexion) ALORS
-      	m_journal.LogErreur("impossible de se connecter au serveur de base de données")
-      	renvoyer faux
-      FIN
+      //si pas HOuvreConnexion(m_connexion) ALORS
+      //	m_journal.LogErreur("impossible de se connecter au serveur de base de données")
+      //	renvoyer faux
+      //FIN
       
       renvoyer vrai
      type : 458752
@@ -61,7 +61,6 @@ class :
      code : |1-
       
       procédure ChargeConfiguration()
-      
       // On adapte la lecture de la base de données avec la nouvelle syntaxe
       m_connexion..Provider		= m_Configuration.LireParametreBDD("Provider", "WinDevClientServeurHF")
       m_connexion..Serveur		= m_Configuration.LireParametreBDD("Serveur", "127.0.0.1")

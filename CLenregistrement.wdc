@@ -157,20 +157,18 @@ class :
      type_code : 12
      code : |1+
       
-      
-      procédure Modifier()
-      // [ARCHITECTURE RAAD : SÉCURITÉ ANTI-INJECTION SQL]
-      // RÈGLE ABSOLUE : Zéro concaténation de valeurs clientes dans les requêtes SQL.
-      // Nous utilisons une variable de type 'Source de Données' couplée à hRequêteDéfaut.
-      // L'affectation dynamique des paramètres se fait via indirection : 
-      // {"MaSource.MonParametre"} = Valeur. Le moteur HFSQL gère le typage et l'échappement.
-      
+      // ==============================================================================
+      // Méthode   : Modifier
+      // Rôle      : Mise à jour sécurisée avec requêtes paramétrées anti-injection
+      // Sécurité  : Verrou absolu anti-UPDATE global (clause WHERE obligatoire)
+      // Version   : WinDev 25 (Strict)
+      // ==============================================================================
       
       LOCAL
       	l_SourceRequete		est une Source de Données
       	l_DonneesJson		est un Variant
-      	l_ClauseWhere		est une chaîne
-      	l_CorpsReq			est une chaîne
+      	l_ClauseWhere		est une chaîne	= ""
+      	l_CorpsReq			est une chaîne	= ""
       	l_NomParametre		est une chaîne
       	
       // 1. Initialisation et Connexion
@@ -183,41 +181,59 @@ class :
       
       POUR TOUT l_Ligne DE l_DonneesJson
       	
-      	// Création d'un nom de paramètre unique (ex: p_Prix)
+      	// Création d'un nom de paramètre unique (ex: p_NomRubrique)
       	l_NomParametre = "p_" + l_Ligne..Nom
       	
-      	SI l_Ligne..Nom = m_CleUnique ALORS
+      	// Détection dynamique de la clé primaire
+      	SI Minuscule(l_Ligne..Nom) = Minuscule(m_CleUnique) ALORS
       		l_ClauseWhere = "WHERE " + l_Ligne..Nom + " = {" + l_NomParametre + "}"
       	SINON
-      		// Ajoute automatiquement la virgule si l_CorpsReq n'est pas vide
+      		// Ajoute automatiquement le séparateur si l_CorpsReq contient déjà des champs
       		l_CorpsReq += [", " + RC] + l_Ligne..Nom + " = {" + l_NomParametre + "}"
       	FIN
       	
-      	// 3. SECRÉTAIRE ANTI-INJECTION : Affectation de la valeur en tant que PARAMÈTRE
-      	// L'indirection crée la propriété de paramètre à la volée sur la source de données.
-      	// Équivaut à taper : l_SourceRequete.p_Prix = 10
+      	// 3. SÉCURITÉ ANTI-INJECTION : Affectation dynamique du paramètre sur la source
       	{"l_SourceRequete." + l_NomParametre} = l_Ligne..Valeur
       FIN
       
-      // 4. Assemblage final de la requête SQL paramétrée
+      // ==============================================================================
+      // 4. VERROU DE SÉCURITÉ ABSOLU : INTERDICTION FORMELLE DU "FULL UPDATE"
+      // ==============================================================================
+      // Si aucune condition WHERE n'a pu être déterminée, on n'exécute RIEN.
+      SI SansEspace(l_ClauseWhere) = "" ALORS
+      	m_erreur = "Opération annulée : Aucune clause de restriction (WHERE) trouvée. Modification globale refusée."
+      	renvoyer  Faux
+      FIN
+      
+      // Si aucun champ à modifier n'est transmis (ex: JSON contenant uniquement l'ID)
+      SI SansEspace(l_CorpsReq) = "" ALORS
+      	// Rien à mettre à jour : sortie sans erreur
+      	RENVOYER Vrai
+      FIN
+      
+      // 5. Assemblage final de la requête SQL paramétrée
       m_RequeteSQL += RC + l_CorpsReq + RC + l_ClauseWhere
       
-      // 5. Exécution sécurisée
-      // La constante hRequêteDéfaut indique à HFSQL d'analyser la chaîne, d'y repérer 
-      // les variables {...} et de les lier aux paramètres affectés à l_SourceRequete.
+      // 6. Exécution sécurisée
+      // hRequêteDéfaut analyse la chaîne et lie les {...} aux membres de l_SourceRequete
       SI PAS HExécuteRequêteSQL(l_SourceRequete, m_base.m_connexion, hRequêteDéfaut, m_RequeteSQL) ALORS
       	m_erreur = ErreurInfo()
+      	RENVOYER Faux
       FIN
+      
+      RENVOYER Vrai
       
       
       CAS ERREUR:
       m_erreur = ErreurInfo()
+      RENVOYER Faux
       
       CAS EXCEPTION:
       m_erreur = ExceptionInfo()
+      RENVOYER Faux
       
       FIN :
-      // Exécuté dans tous les cas
+      // Exécuté systématiquement en fin de traitement (même lors d'un RETOUR prématuré)
       m_base.Déconnexion()
      type : 458752
    -
@@ -258,10 +274,10 @@ class :
       
       VariantEnregistrement		est un variant	= JSONVersVariant(m_json)
       NouvelEnregistrement	est un Enregistrement
-      NouvelEnregistrement = {m_NomTable}
+      NouvelEnregistrement = {m_NomTable,indFichier}
       
       POUR i=1 _a_ VariantEnregistrement..Membre..Occurrence
-      	{"E_record."+VariantEnregistrement..Membre[i]..Nom} = VariantEnregistrement..Membre[i]..Valeur 	
+      	{"NouvelEnregistrement."+VariantEnregistrement..Membre[i]..Nom} = VariantEnregistrement..Membre[i]..Valeur 	
       FIN
       
       renvoyer NouvelEnregistrement
@@ -272,7 +288,7 @@ class :
      type_code : 12
      code : |1-
       // Ajout du paramètre a_Operateur avec une valeur par défaut vide
-      PROCEDURE ChargerCollection(a_RubriqueFiltre est une chaîne = "", a_ValeurFiltre est une chaîne = "", a_Operateur est une chaîne = "")
+       PROCEDURE ChargerCollection(a_RubriqueFiltre est une chaîne = "", a_ValeurFiltre est une chaîne = "", a_Operateur est une chaîne = "")
       
       // Blindage de l'accès aux données contre les corruptions d'index ou verrous HFSQL
       QUAND EXCEPTION DANS
@@ -280,8 +296,6 @@ class :
       	LOCAL
       		l_SourceDonnees				est une Source de Données
       		l_RequeteSQL				est une chaîne
-      		l_VariantTableau			est un tableau de variants
-      		l_VariantLigne				est un variant
       		l_OperateurSql				est une chaîne	= Minuscule(a_Operateur)
       		l_tableauEnregistrements	est un tableau de Enregistrement
       		// CONDITIONS ET OPÉRATEURS PRIS EN CHARGE PAR L'API :

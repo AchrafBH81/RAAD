@@ -404,7 +404,6 @@ class :
       
       LOCAL
       	l_ExtensionNettoyee	est une chaîne
-      	l_InfoResultat		est un chaine
       	
       // 1. Normalisation de l'extension transmise
       l_ExtensionNettoyee = Minuscule(SansEspace(a_Extension))
