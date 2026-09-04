@@ -16,7 +16,6 @@ class :
    -
      code : |1+
       CLEnregistrement est une Classe
-      	m_base						est un  CLBase
       	m_condition					est une chaîne 
       	m_erreur					est une chaîne 
       	m_json						est une chaîne	// Représentation JSON de l'entité active 
@@ -25,6 +24,15 @@ class :
       	m_CleUnique					est une chaîne	// Nom de la colonne constituant la clé primaire unique identifiée
       	m_ValeurCle					est une chaîne	// Valeur active de la clé primaire de l'enregistrement chargé
       	
+      	// Paramètres d'accès HFSQL Client/Serveur
+      	m_ProviderBdd			est une chaîne	
+      	m_ServeurBdd			est une chaîne
+      	m_NomBaseDonnees		est une chaîne
+      	m_UtilisateurBdd		est une chaîne
+      	m_MotDePasseBdd			est une chaîne
+      	
+      	// Nom logique unique de la session HFSQL pour l'action courante
+      	m_NomConnexion			est une chaîne	= ""
       fin
       
      type : 131072
@@ -47,18 +55,21 @@ class :
      type : 655360
    -
      name : Init
-     internal_properties : BQAAAAUAAAAcLpBr0K4gYdokgggwYHq/YBDVaIPdjeR1VEo/vzFcOGRJ3cJSZZ8PG6l3iF2SwOIJ5Kz9k7gF+y7kHyJ9kOiyf4Gl6ZSxsH3J0o4OXMu3LZ/R6PhT8uLCOdoLDGeu/5VyBBzyGltKMtMa629WkCiEXPdkF9BB3bcZIms8d/TFHbUUK8MzJhfF8wS+fXWDR63qNdSJuQ==
+     internal_properties : BQAAAAUAAAA8hxYh8NT7LRSzqVlUm63FeSLWqDaACT4vutQ1tRyK6waTMYTBkjB9IBg6+M6WNQ5s3Lz1tg6105gULa4k5Aw9twj6ImxKb2oGXupoStv0Z3RJJ8+7nCE+yueCfLFSrJEhgBedYhfD/A7J5GOino9yC3kNhJ6LTvX+u3r001Y2x/6aWgbnZoxpyMVNR3tvwj8zw2tMx8w=
      procedure_id : 1891210886552515520
      type_code : 12
      code : |1+
       procédure Init(a_table est une chaîne)
       
       // on initialise la classe avec le nom de la table 
-      
-      // Extraction de la structure de la table 
-      
       m_NomTable = a_table
       indrub est un entier
+      
+      // Extraction de la structure de la table 
+      Connexion()
+      HChangeConnexion({m_NomTable,indFichier},{m_NomConnexion})
+      
+      
       
       l_ResRub est une chaîne = HListeClé(m_NomTable,hLstDétailPlus)
       l_nomRub est une chaine  
@@ -80,26 +91,15 @@ class :
       
       	si m_CleUnique <> "" ALORS SORTIR
       FIN
-      //// déclaration dynamique de l'enregistrement 
-      //Trace(m_enrg..FichierAssocié)
-      //l_codeDynamique  est chaine = [
-      //e_%1 est un Enregistrement de %1 
-      //hlitpremier(wbarticle)
-      //]
-      //l_codeDynamique = ChaîneConstruit(l_codeDynamique,m_table)
-      //
-      //ExécuteCode(l_codeDynamique)
-      
-      
       
       CAS ERREUR:
-      m_base.Déconnexion()
+      Déconnexion()
       m_erreur = ErreurInfo()
       
       
       
       CAS EXCEPTION:
-      m_base.Déconnexion()
+      Déconnexion()
       m_erreur = ExceptionInfo()
       
      type : 458752
@@ -124,8 +124,8 @@ class :
       	m_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 where %2" , m_NomTable, m_condition ) 
       FIN
       
-      m_base.Connexion()
-      HExécuteRequêteSQL(L_ReqSQL,m_base.m_connexion,hRequêteSansCorrection,m_RequeteSQL)
+      Connexion()
+      HExécuteRequêteSQL(L_ReqSQL,m_NomConnexion,hRequêteSansCorrection,m_RequeteSQL)
       // lire le premier enregistrement  
       HLitPremier(L_ReqSQL)
       FichierVersMémoire(L_ResEnregistrement,L_ReqSQL)
@@ -136,18 +136,18 @@ class :
       
       
       CAS ERREUR:
-      m_base.Déconnexion()
+      Déconnexion()
       m_erreur = ErreurInfo()
       
       
       
       CAS EXCEPTION:
-      m_base.Déconnexion()
+      Déconnexion()
       m_erreur = ExceptionInfo()
       
       
       FIN :
-      m_base.Déconnexion()
+      Déconnexion()
      type : 458752
    -
      name : Modifier
@@ -170,7 +170,7 @@ class :
       	l_NomParametre		est une chaîne
       	
       // 1. Initialisation et Connexion
-      m_base.Connexion()
+      Connexion()
       
       l_DonneesJson	= JSONVersVariant(m_json)
       
@@ -214,7 +214,7 @@ class :
       
       // 6. Exécution sécurisée
       // hRequêteDéfaut analyse la chaîne et lie les {...} aux membres de l_SourceRequete
-      SI PAS HExécuteRequêteSQL(l_SourceRequete, m_base.m_connexion, hRequêteDéfaut, m_RequeteSQL) ALORS
+      SI PAS HExécuteRequêteSQL(l_SourceRequete, m_NomConnexion, hRequêteDéfaut, m_RequeteSQL) ALORS
       	m_erreur = ErreurInfo()
       	RENVOYER Faux
       FIN
@@ -232,7 +232,7 @@ class :
       
       FIN :
       // Exécuté systématiquement en fin de traitement (même lors d'un RETOUR prématuré)
-      m_base.Déconnexion()
+      Déconnexion()
      type : 458752
    -
      name : Creer
@@ -240,6 +240,9 @@ class :
      type_code : 12
      code : |1-
       procédure Creer()
+      
+      Connexion()
+      HChangeConnexion({m_NomTable,indFichier},m_NomConnexion)
       
       HRAZ(m_NomTable)
       {m_NomTable,indFichier} = _JsonVersEnregistrement()
@@ -250,18 +253,18 @@ class :
       
       
       CAS ERREUR:
-      m_base.Déconnexion()
+      Déconnexion()
       m_erreur = ErreurInfo()
       
       
       
       CAS EXCEPTION:
-      m_base.Déconnexion()
+      Déconnexion()
       m_erreur = ExceptionInfo()
       
       
       FIN :
-      m_base.Déconnexion()
+      Déconnexion()
      type : 458752
    -
      name : _JsonVersEnregistrement
@@ -284,7 +287,7 @@ class :
      name : ChargerCollection
      procedure_id : 1897198161154489649
      type_code : 12
-     code : |1-
+     code : |1+
       // Ajout du paramètre a_Operateur avec une valeur par défaut vide
        PROCEDURE ChargerCollection(a_RubriqueFiltre est une chaîne = "", a_ValeurFiltre est une chaîne = "", a_Operateur est une chaîne = "")
       
@@ -330,8 +333,9 @@ class :
       		l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1", m_NomTable)
       	FIN
       	
+      	Connexion()
       	// Exécution SQL dans l'isolation du thread courant
-      	SI HExécuteRequêteSQL(l_SourceDonnees, hRequêteDéfaut, l_RequeteSQL) ALORS
+      	SI HExécuteRequêteSQL(l_SourceDonnees,m_NomConnexion, hRequêteDéfaut, l_RequeteSQL) ALORS
       //		POUR TOUT l_SourceDonnees
       //			l_VariantLigne = l_SourceDonnees
       //			TableauAjoute(l_VariantTableau, l_VariantLigne)
@@ -350,6 +354,8 @@ class :
       	// Capture des ruptures de connexions ou crashs d'indirection
       	m_erreur = "{""erreur"": ""Le moteur de données a rencontré une exception fatale.""}"
       FIN
+      
+      Déconnexion()
      type : 458752
    -
      name : _GenererJsonDepuisSource
@@ -467,6 +473,88 @@ class :
       	m_erreur = "{""erreur"": ""Échec de la suppression en masse : " + HErreurInfo(hErrMessage) + """}"
       SINON
       	m_erreur = ""
+      FIN
+      
+     type : 458752
+   -
+     name : ConfigurerAccesBdd
+     procedure_id : 1917049530062857359
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Méthode : ConfigurerAccesBdd
+      // Rôle    : Stocke les coordonnées d'accès complètes (avec Provider)
+      // ==============================================================================
+      PROCÉDURE ConfigurerAccesBdd(a_Provider est une chaîne, a_Serveur est une chaîne, a_NomBase est une chaîne, a_Utilisateur est une chaîne, a_MotDePasse est une chaîne)
+      
+      m_ProviderBdd		= SansEspace(a_Provider)
+      m_ServeurBdd		= SansEspace(a_Serveur)
+      m_NomBaseDonnees	= SansEspace(a_NomBase)
+      m_UtilisateurBdd	= SansEspace(a_Utilisateur)
+      m_MotDePasseBdd		= a_MotDePasse
+      
+     type : 458752
+   -
+     name : Connexion
+     procedure_id : 1917049697566620903
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Méthode : Connexion
+      // Rôle    : Décrit et ouvre la session HFSQL dédiée en exploitant le Provider
+      // ==============================================================================
+      PROCÉDURE Connexion() : booléen
+      
+      LOCAL
+      	l_SuccesOuverture	est un booléen	= Faux
+      	//l_DescriptionCnx	est une Connexion
+      	
+      // Sécurité : fermeture préventive en cas de reliquat
+      SI m_NomConnexion <> "" ALORS
+      	Déconnexion()
+      FIN
+      
+      // 1. Génération d'un nom de connexion STRICTEMENT unique au thread
+      m_NomConnexion					= "CNX_" + m_NomTable + "_" + DonneGUID(guidBrut)
+      //
+      //// 2. Affectation des propriétés via une variable Connexion locale
+      //l_DescriptionCnx..Provider		= (m_ProviderBdd <> "" ? m_ProviderBdd SINON "WinDevClientServeurHF")
+      //l_DescriptionCnx..Serveur		= m_ServeurBdd
+      //l_DescriptionCnx..BaseDeDonnées	= m_NomBaseDonnees
+      //l_DescriptionCnx..Utilisateur	= m_UtilisateurBdd
+      //l_DescriptionCnx..MotDePasse	= m_MotDePasseBdd
+      //
+      //HOuvreConnexion(l_DescriptionCnx)
+      
+      // 3. Déclaration de la connexion sous son nom unique dans le contexte du thread
+      HDécritConnexion(m_NomConnexion,m_UtilisateurBdd,m_MotDePasseBdd,m_ServeurBdd,m_NomBaseDonnees,m_ProviderBdd)
+      
+      // 4. Établissement de la liaison réseau vers le moteur HFSQL
+      l_SuccesOuverture = HOuvreConnexion(m_NomConnexion)
+      
+      SI PAS l_SuccesOuverture ALORS
+      	m_NomConnexion = ""
+      	renvoyer  Faux
+      FIN
+      
+      RENVOYER Vrai
+      
+     type : 458752
+   -
+     name : Déconnexion
+     procedure_id : 1917051424143548012
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Méthode : Déconnexion
+      // Rôle    : Libère et clôture la session réseau HFSQL du thread en cours
+      // ==============================================================================
+      PROCÉDURE Déconnexion()
+      
+      SI m_NomConnexion <> "" ALORS
+      	HFermeConnexion(m_NomConnexion)
+      	HAnnuleDéclaration(m_NomConnexion)
+      	m_NomConnexion = ""
       FIN
       
      type : 458752

@@ -46,10 +46,10 @@ class :
       
       procédure Connexion()
       
-      //si pas HOuvreConnexion(m_connexion) ALORS
-      //	m_journal.LogErreur("impossible de se connecter au serveur de base de données")
-      //	renvoyer faux
-      //FIN
+      si pas HOuvreConnexion(m_connexion) ALORS
+      	m_journal.LogErreur("impossible de se connecter au serveur de base de données")
+      	renvoyer faux
+      FIN
       
       renvoyer vrai
      type : 458752
@@ -73,37 +73,57 @@ class :
      type_code : 12
      code : |1+
       
-      procédure Initialisation(LOCAL A_fichierini est CLConfiguration dynamique , local A_log  est CLjournalisation dynamique)
+      // ==============================================================================
+      // Méthode : Initialisation
+      // Rôle    : Initialise les prototypes et injecte le Provider BDD
+      // ==============================================================================
+      PROCÉDURE Initialisation(a_Configuration est un CLConfiguration, a_Journal est un CLJournalisation dynamique)
       
-      m_Configuration	= A_fichierini
-      m_journal			=  A_log
       
-      local
-      	l_NomTable est chaine 
       
+      
+      LOCAL
+      	l_ListeTables		est une chaîne
+      	l_NomTableCourante	est une chaîne
+      	l_Indice			est un entier	= 1
+      	
+      	l_Provider			est une chaîne
+      	l_Serveur			est une chaîne
+      	l_NomBase			est une chaîne
+      	l_Utilisateur		est une chaîne
+      	l_MotDePasse		est une chaîne
+      	
+      // 1. Lecture des coordonnées complètes depuis config.conf
+      l_Provider		= a_Configuration.LireParametreBDD("Provider", "WinDevClientServeurHF")
+      l_Serveur		= a_Configuration.LireParametreBDD("Serveur", "127.0.0.1")
+      l_NomBase		= a_Configuration.LireParametreBDD("BaseDeDonnées", "")
+      l_Utilisateur	= a_Configuration.LireParametreBDD("Utilisateur", "admin")
+      l_MotDePasse	= a_Configuration.LireParametreBDD("MotDePasse", "")
+      
+      
+      
+      m_Configuration		= a_Configuration
+      m_journal			= a_Journal
       ChargeConfiguration()
+      Connexion()
+      // 2. Découverte de toutes les tables du schéma
       
-      si Connexion() ALORS
-      	sListetable est chaine = HListeFichier(m_connexion)
+      l_ListeTables	= Remplace(HListeFichier(m_connexion),[".FIC",".fic"],"")
+      
+      BOUCLE
+      	l_NomTableCourante = ExtraitChaîne(l_ListeTables, l_Indice, RC)
+      	SI l_NomTableCourante = EOT OU l_NomTableCourante = "" ALORS SORTIR
       	
-      	pour tout CHAÎNE a_table de  sListetable SÉPARÉE PAR RC
-      		// on déclare les tables de la base 
-      		
-      		l_NomTable = Remplace(a_table,[".FIC",".fic"],"")
-      		
-      		HDéclareExterne(a_table,l_NomTable,m_connexion)
-      		l_table est dynamique clenregistrement = new clenregistrement 
-      		l_table.init(l_NomTable)
-      		l_table.m_base <= objet
+      	HDéclareExterne(l_NomTableCourante+".fic",l_NomTableCourante,m_connexion)
+      	l_NouveauRecord		est un dynamique CLEnregistrement = new CLEnregistrement
+      	l_NouveauRecord.ConfigurerAccesBdd(l_Provider, l_Serveur, l_NomBase, l_Utilisateur, l_MotDePasse)
+      	l_NouveauRecord.Init(l_NomTableCourante)
       	
-      		m_table[l_NomTable] =new clenregistrement
-      		m_Table[l_NomTable] = l_table
-      		
-      		
-      	FIN
+      	// Enregistrement dans le dictionnaire des prototypes
+      	m_Table[l_NomTableCourante] = l_NouveauRecord
       	
+      	l_Indice++
       FIN
-      
       Déconnexion()
      type : 458752
    -
@@ -138,21 +158,6 @@ class :
       Déconnexion()
       
       renvoyer l_res
-     type : 458752
-   -
-     name : CreerNouveauRecord
-     procedure_id : 1887690151532548473
-     type_code : 12
-     code : |1+
-      procédure CreerNouveauRecord(LOCAL a_NomTable est une chaîne) : clenregistrement 
-      
-      // On alloue une NOUVELLE instance en mémoire pour chaque requête
-      l_nouveauRecord est un clenregistrement dynamique = allouer un clenregistrement
-      l_nouveauRecord.init(a_NomTable)
-      l_nouveauRecord.m_base <= Objet // On passe la référence de la base
-      
-      RENVOYER l_nouveauRecord
-      
      type : 458752
   procedure_templates : []
   property_templates : []
