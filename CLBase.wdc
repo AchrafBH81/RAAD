@@ -16,7 +16,6 @@ class :
    -
      code : |1+
       CLBase est une Classe
-      	
       	m_connexion						est une connexion
       	m_Configuration					est clConfiguration dynamique 
       	m_journal						est CLjournalisation dynamique 
@@ -139,65 +138,6 @@ class :
       Déconnexion()
       
       renvoyer l_res
-     type : 458752
-   -
-     name : LireEnregistrement
-     procedure_id : 1473768064283517472
-     type_code : 12
-     code : |1+
-      procédure publique  LireEnregistrement(L_EnregistrementCourant est clenregistrement )
-      
-      LOCAL
-      l_ReqSQL est une source de données
-      L_ResEnregistrement est un Enregistrement 
-      	
-      Connexion()
-      
-      si L_EnregistrementCourant.m_ValeurCle <> "" ALORS
-      	HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_NomTable, L_EnregistrementCourant.m_CleUnique + " = " + L_EnregistrementCourant.m_ValeurCle ))
-      	
-      sinon
-      	HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,ChaîneConstruit("SELECT * FROM %1 where %2" , L_EnregistrementCourant.m_NomTable, L_EnregistrementCourant.m_condition ))	
-      FIN
-      
-      // lire le premier enregistrement  
-      HLitPremier(l_ReqSQL)
-      FichierVersMémoire(L_ResEnregistrement,l_ReqSQL)
-      
-      Sérialise(L_ResEnregistrement,L_EnregistrementCourant.m_json,psdJSON)
-      
-      
-      
-      CAS ERREUR:
-      L_EnregistrementCourant.m_erreur = ErreurInfo()
-      
-      
-      CAS EXCEPTION:
-      L_EnregistrementCourant.m_erreur = ExceptionInfo()
-      
-      
-      fin :
-       Déconnexion()
-     type : 458752
-   -
-     name : GetTabRecords
-     procedure_id : 1473770112983000932
-     type_code : 12
-     code : |1+
-      procédure GetTabRecords() 
-      
-      LOCAL
-      _TableauEnregistrements		est un tableau de Enregistrements  
-      l_ReqSQL est une source de données
-      	
-      Connexion()
-      	
-      HExécuteRequêteSQL(l_ReqSQL,m_connexion,hRequêteSansCorrection,"SELECT * FROM WBLignePieces where WBLignePieces.IDwb_piece = 110905")
-      FichierVersTableau(_TableauEnregistrements,l_ReqSQL)
-      
-      
-      Déconnexion()
-      
      type : 458752
    -
      name : CreerNouveauRecord

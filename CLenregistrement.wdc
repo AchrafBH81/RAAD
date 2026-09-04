@@ -25,8 +25,6 @@ class :
       	m_CleUnique					est une chaîne	// Nom de la colonne constituant la clé primaire unique identifiée
       	m_ValeurCle					est une chaîne	// Valeur active de la clé primaire de l'enregistrement chargé
       	
-      	
-      
       fin
       
      type : 131072
