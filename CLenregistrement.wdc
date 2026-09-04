@@ -153,7 +153,7 @@ class :
      name : Modifier
      procedure_id : 1891210886552646592
      type_code : 12
-     code : |1+
+     code : |1-
       
       // ==============================================================================
       // Méthode   : Modifier
@@ -163,76 +163,90 @@ class :
       // ==============================================================================
       
       LOCAL
-      	l_SourceRequete		est une Source de Données
-      	l_DonneesJson		est un Variant
-      	l_ClauseWhere		est une chaîne	= ""
-      	l_CorpsReq			est une chaîne	= ""
-      	l_NomParametre		est une chaîne
+      	l_SourceRequete			est une Source de Données
+      	l_DonneesJson			est un Variant
+      	l_ClauseWhere			est une chaîne	= ""
+      	l_CorpsReq				est une chaîne	= ""
+      	l_NomParametre			est une chaîne
+      	l_SuccesExecution		est un booléen	= Faux
+      	l_CleTrouveeDansJson	est un booléen	= Faux
       	
-      // 1. Initialisation et Connexion
-      Connexion()
-      
-      l_DonneesJson	= JSONVersVariant(m_json)
-      
-      // 2. Construction de l'ossature SQL paramétrée
-      m_RequeteSQL	= "UPDATE " + m_NomTable + RC + "SET "
-      
-      POUR TOUT l_Ligne DE l_DonneesJson
-      	
-      	// Création d'un nom de paramètre unique (ex: p_NomRubrique)
-      	l_NomParametre = "p_" + l_Ligne..Nom
-      	
-      	// Détection dynamique de la clé primaire
-      	SI Minuscule(l_Ligne..Nom) = Minuscule(m_CleUnique) ALORS
-      		l_ClauseWhere = "WHERE " + l_Ligne..Nom + " = {" + l_NomParametre + "}"
-      	SINON
-      		// Ajoute automatiquement le séparateur si l_CorpsReq contient déjà des champs
-      		l_CorpsReq += [", " + RC] + l_Ligne..Nom + " = {" + l_NomParametre + "}"
-      	FIN
-      	
-      	// 3. SÉCURITÉ ANTI-INJECTION : Affectation dynamique du paramètre sur la source
-      	{"l_SourceRequete." + l_NomParametre} = l_Ligne..Valeur
-      FIN
-      
-      // ==============================================================================
-      // 4. VERROU DE SÉCURITÉ ABSOLU : INTERDICTION FORMELLE DU "FULL UPDATE"
-      // ==============================================================================
-      // Si aucune condition WHERE n'a pu être déterminée, on n'exécute RIEN.
-      SI SansEspace(l_ClauseWhere) = "" ALORS
-      	m_erreur = "Opération annulée : Aucune clause de restriction (WHERE) trouvée. Modification globale refusée."
-      	renvoyer  Faux
-      FIN
-      
-      // Si aucun champ à modifier n'est transmis (ex: JSON contenant uniquement l'ID)
-      SI SansEspace(l_CorpsReq) = "" ALORS
-      	// Rien à mettre à jour : sortie sans erreur
-      	RENVOYER Vrai
-      FIN
-      
-      // 5. Assemblage final de la requête SQL paramétrée
-      m_RequeteSQL += RC + l_CorpsReq + RC + l_ClauseWhere
-      
-      // 6. Exécution sécurisée
-      // hRequêteDéfaut analyse la chaîne et lie les {...} aux membres de l_SourceRequete
-      SI PAS HExécuteRequêteSQL(l_SourceRequete, m_NomConnexion, hRequêteDéfaut, m_RequeteSQL) ALORS
-      	m_erreur = ErreurInfo()
+      // 1. Validation de surface : table et clé primaire obligatoires
+      SI SansEspace(m_NomTable) = "" OU SansEspace(m_CleUnique) = "" ALORS
+      	m_erreur = "Erreur ORM : Table ou clé unique non configurée."
       	RENVOYER Faux
       FIN
       
-      RENVOYER Vrai
+      // 2. Désérialisation du buffer JSON
+      l_DonneesJson = JSONVersVariant(m_json)
+      SI l_DonneesJson = Null ALORS
+      	m_erreur = "Erreur ORM : Contenu JSON invalide ou vide."
+      	RENVOYER Faux
+      FIN
       
+      // 3. Parcours du JSON et alimentation des paramètres de liaison
+      POUR TOUT l_Ligne DE l_DonneesJson
+      	l_NomParametre = "p_" + l_Ligne..Nom
+      	
+      	// Comparaison insensible à la casse pour détecter la clé primaire dans le corps
+      	SI Minuscule(SansEspace(l_Ligne..Nom)) = Minuscule(SansEspace(m_CleUnique)) ALORS
+      		l_CleTrouveeDansJson	= Vrai
+      		l_ClauseWhere			= "WHERE " + m_CleUnique + " = {" + l_NomParametre + "}"
+      	SINON
+      		// Construction de la liste SET
+      		l_CorpsReq += [", " + RC] + l_Ligne..Nom + " = {" + l_NomParametre + "}"
+      	FIN
+      	
+      	// Affectation dynamique sécurisée
+      	{"l_SourceRequete." + l_NomParametre} = l_Ligne..Valeur
+      FIN
+      
+      // 4. Repli : Si la clé n'était pas dans le JSON, utilisation de m_ValeurCle (reçue de l'URL)
+      SI PAS l_CleTrouveeDansJson ET SansEspace(m_ValeurCle) <> "" ALORS
+      	{"l_SourceRequete.p_CleUniqueUrl"} = m_ValeurCle
+      	l_ClauseWhere = "WHERE " + m_CleUnique + " = {p_CleUniqueUrl}"
+      FIN
+      
+      // ==============================================================================
+      // 5. LE KILL-SWITCH ABSOLU : INTERDICTION DU "FULL UPDATE"
+      // ==============================================================================
+      SI SansEspace(l_ClauseWhere) = "" ALORS
+      	m_erreur = "ALERTE SÉCURITÉ : Tentative d'UPDATE sans clause WHERE bloquée pour la table : " + m_NomTable
+      	RENVOYER Faux
+      FIN
+      
+      // S'il n'y a aucun champ à modifier (ex: JSON ne contenant que l'identifiant)
+      SI SansEspace(l_CorpsReq) = "" ALORS
+      	RENVOYER Vrai
+      FIN
+      
+      // 6. Ouverture de la connexion isolée du thread
+      SI PAS :Connexion() ALORS
+      	m_erreur = "Erreur ORM : Impossible d'ouvrir la connexion base de données."
+      	RENVOYER Faux
+      FIN
+      
+      // 7. Assemblage et exécution
+      m_RequeteSQL		= "UPDATE " + m_NomTable + RC + "SET " + RC + l_CorpsReq + RC + l_ClauseWhere
+      
+      l_SuccesExecution	= HExécuteRequêteSQL(l_SourceRequete, m_NomConnexion, hRequêteDéfaut, m_RequeteSQL)
+      SI PAS l_SuccesExecution ALORS
+      	m_erreur = HErreurInfo()
+      FIN
+      
+      RENVOYER l_SuccesExecution
       
       CAS ERREUR:
-      m_erreur = ErreurInfo()
-      RENVOYER Faux
+      m_erreur = HErreurInfo()
+      renvoyer  Faux
       
       CAS EXCEPTION:
       m_erreur = ExceptionInfo()
       RENVOYER Faux
       
       FIN :
-      // Exécuté systématiquement en fin de traitement (même lors d'un RETOUR prématuré)
-      Déconnexion()
+      HAnnuleDéclaration(l_SourceRequete)
+      :Déconnexion()
      type : 458752
    -
      name : Creer
