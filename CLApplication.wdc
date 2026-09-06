@@ -92,11 +92,7 @@ class :
       SINON SI Position(l_UriDemande, "api/v1/sql", 1, SansCasse) = 1 ALORS
       	_ExecuterRequeteSQL(a_SocketRecu)
       	
-      	// Route 4 : Diagnostic Mémoire Système
-      SINON SI Position(l_UriDemande, "api/v1/memoire", 1, SansCasse) = 1 ALORS
-      	_GetMemory(a_SocketRecu)
-      	
-      	// Route 5 : Fichiers statiques WWW
+      	// Route 4 : Fichiers statiques WWW
       SINON
       	_ObtenirFichier(a_SocketRecu)
       FIN
@@ -208,17 +204,6 @@ class :
       ChaineRequete = L_RequeteHttp.m_Parametres["sql"]
       
       L_RequeteHttp.m_CodeReponse = "200 OK"
-     type : 458752
-   -
-     name : _GetMemory
-     procedure_id : 1475447456628364679
-     type_code : 12
-     code : |1+
-      procédure privée _GetMemory(L_RequeteHttp est CLCanalSocket) <métier>
-      
-      
-      
-      
      type : 458752
    -
      name : _ObtenirFichier
