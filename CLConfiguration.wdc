@@ -194,7 +194,7 @@ class :
       			CAS "bdd", "basededonnees", "base_de_donnees":
       				m_ParametresBDD[l_Cle] = l_Valeur
       				
-      			CAS "vhost", "vhosts", "virtualhosts":
+      			CAS "host", "hosts", "virtualhosts":
       				m_ParametresVHost[Minuscule(l_Cle)] = l_Valeur
       				
       			CAS "securite", "security", "authentification":

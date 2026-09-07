@@ -35,9 +35,7 @@ class :
       	m_ContenuBuffer							est un Buffer
       	m_CodeReponse							est une chaîne
       	m_Parametres							est un tableau associatif de chaînes
-      	m_RepertoireExecutable					est une chaîne
-      	
-      		
+      	m_RepertoireExecutable					est une chaîne	
       		
       fin
      type : 131072
