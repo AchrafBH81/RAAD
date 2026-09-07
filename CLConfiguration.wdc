@@ -35,6 +35,8 @@ class :
       	m_ParametresServeur			est un tableau associatif de chaînes
       	m_ParametresBDD				est un tableau associatif de chaînes
       	m_ParametresVHost			est un tableau associatif de chaînes
+      	m_ParametresSecurite		est un tableau associatif de chaînes
+      	
       	
       	// Paramètres statiques (chargés une seule fois au démarrage)
       	m_TabReponse		est un tableau associatif de chaînes
@@ -95,6 +97,7 @@ class :
       SupprimeTout(m_ParametresServeur)
       SupprimeTout(m_ParametresBDD)
       SupprimeTout(m_ParametresVHost)
+      SupprimeTout(m_ParametresSecurite)
      type : 655360
    -
      name : ChargerConfiguration
@@ -125,6 +128,11 @@ class :
       SI l_ContenuTexte = "" ALORS
       	RENVOYER Faux
       sinon
+      	// Réinitialisation de l'ensemble des tableaux avant rechargement à chaud
+      	SupprimeTout(m_ParametresServeur)
+      	SupprimeTout(m_ParametresBDD)
+      	SupprimeTout(m_ParametresVHost)
+      	SupprimeTout(m_ParametresSecurite)
       	_ParserFichierConf(l_ContenuTexte)
       FIN
      type : 458752
@@ -175,6 +183,10 @@ class :
       			l_Valeur = Milieu(l_Valeur, 2, Taille(l_Valeur) - 2)
       		FIN
       		
+      		// ==============================================================================
+      		// Dans le SELON l_SectionCourante de CLConfiguration::_ParserFichierConf
+      		// ==============================================================================
+      		
       		SELON l_SectionCourante
       			CAS "serveur":
       				m_ParametresServeur[l_Cle] = l_Valeur
@@ -182,12 +194,15 @@ class :
       			CAS "bdd", "basededonnees", "base_de_donnees":
       				m_ParametresBDD[l_Cle] = l_Valeur
       				
-      			CAS "host", "hosts", "virtualhosts":
-      				// Stockage de l'hôte en minuscules -> Nom du sous-dossier uniquement
+      			CAS "vhost", "vhosts", "virtualhosts":
       				m_ParametresVHost[Minuscule(l_Cle)] = l_Valeur
       				
+      			CAS "securite", "security", "authentification":
+      				// Stockage dynamique des directives d'authentification et de test
+      				m_ParametresSecurite[l_Cle] = l_Valeur
+      				
       			AUTRE CAS:
-      				// Section non gérée ignorée
+      				// Section non reconnue : ignorée silencieusement
       		FIN
       	FIN
       FIN
@@ -422,6 +437,36 @@ class :
             Cache-Control:no-cache
       	]
       FIN
+     type : 458752
+   -
+     name : LireParametreSecurite
+     procedure_id : 1917952448154023355
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Récupère la valeur d'un paramètre de sécurité ou d'authentification.
+      /// </summary>
+      /// <param name="a_Cle">Nom de la clé dans la section [Securite] (ex: "TableUtilisateurs", "CleTest").</param>
+      /// <param name="a_ValeurParDefaut">Valeur de repli si la clé est absente.</param>
+      /// <returns>La valeur configurée ou la valeur par défaut.</returns>
+      PROCÉDURE LireParametreSecurite(a_Cle est une chaîne, a_ValeurParDefaut est une chaîne = "") : chaîne
+      
+      LOCAL
+      	l_CleRecherche est une chaîne = a_Cle
+      	
+      // 1. Accès direct O(1) par table de hachage
+      SI m_ParametresSecurite[l_CleRecherche]..Existe ALORS
+      	RENVOYER m_ParametresSecurite[l_CleRecherche]
+      FIN
+      
+      // 2. Recherche tolérante insensible à la casse
+      POUR CHAQUE l_ValeurParametre, l_CleParametre DE m_ParametresSecurite
+      	SI Minuscule(l_CleParametre) = Minuscule(a_Cle) ALORS
+      		RENVOYER l_ValeurParametre
+      	FIN
+      FIN
+      
+      RENVOYER a_ValeurParDefaut
      type : 458752
   properties :
    -

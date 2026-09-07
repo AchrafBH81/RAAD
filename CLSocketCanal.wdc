@@ -17,25 +17,25 @@ class :
      code : |1+
       
       CLCanalSocket est une Classe
-      	m_configuration						est CLConfiguration dynamique
-      	m_NomSocket							est chaine 
-      	m_AdresseClient						est chaîne
-      	m_MessageSocketRecu					est chaine 
-      	m_MessageSocketReponse				est chaine 
-      	m_CanalOuvert						est un booléen
+      	m_configuration							est CLConfiguration dynamique
+      	m_NomSocket								est chaine 
+      	m_AdresseClient							est chaîne
+      	m_MessageSocketRecu						est chaine 
+      	m_MessageSocketReponse					est chaine 
+      	m_CanalOuvert							est un booléen
       	
-      	m_UrlRecue							est une chaîne
-      	m_PointDEntree						est une chaîne 		
-      	m_CorpsRequete						est une chaîne 
-      	m_EnteteRequete						est une chaîne 
-      	m_TypeReq							est une chaîne
-      	m_PositionUrl						est un entier
-      	m_extension							est une chaîne 
-      	m_Gzip								est un booléen
-      	m_ContenuBuffer						est un Buffer
-      	m_CodeReponse						est une chaîne
-      	m_Parametres						est un tableau associatif de chaînes
-      	m_RepertoireExecutable				est une chaîne
+      	m_UrlRecue								est une chaîne
+      	m_PointDEntree							est une chaîne 		
+      	m_CorpsRequete							est une chaîne 
+      	m_EnteteRequete							est une chaîne 
+      	m_TypeRequete							est une chaîne
+      	m_PositionUrl							est un entier
+      	m_extension								est une chaîne 
+      	m_Gzip									est un booléen
+      	m_ContenuBuffer							est un Buffer
+      	m_CodeReponse							est une chaîne
+      	m_Parametres							est un tableau associatif de chaînes
+      	m_RepertoireExecutable					est une chaîne
       	
       		
       		
@@ -67,12 +67,12 @@ class :
      code : |1+
       procédure AnalyserRequete()
       
-      m_EnteteRequete		= Décode(m_MessageSocketRecu[[ À Position(m_MessageSocketRecu,RC+RC)-1]],encodeURLVersUTF8)
-      m_CorpsRequete		= Décode(m_MessageSocketRecu[[Position(m_MessageSocketRecu,RC+RC)+4 À ]],encodeURLVersUTF8)
-      m_PositionUrl		= Position(m_EnteteRequete,"/")
-      m_TypeReq			= SansEspace(m_EnteteRequete[1 À m_PositionUrl-1])
-      m_UrlRecue			= SansEspace(m_EnteteRequete[[m_PositionUrl+1 À Position(m_EnteteRequete,"HTTP",m_PositionUrl)-1]])
-      m_PointDEntree		= Minuscule( m_UrlRecue[[  À Position(m_UrlRecue,"/")-1 ]])
+      m_EnteteRequete			= Décode(m_MessageSocketRecu[[ À Position(m_MessageSocketRecu,RC+RC)-1]],encodeURLVersUTF8)
+      m_CorpsRequete			= Décode(m_MessageSocketRecu[[Position(m_MessageSocketRecu,RC+RC)+4 À ]],encodeURLVersUTF8)
+      m_PositionUrl			= Position(m_EnteteRequete,"/")
+      m_TypeRequete			= SansEspace(m_EnteteRequete[1 À m_PositionUrl-1])
+      m_UrlRecue				= SansEspace(m_EnteteRequete[[m_PositionUrl+1 À Position(m_EnteteRequete,"HTTP",m_PositionUrl)-1]])
+      m_PointDEntree			= Minuscule( m_UrlRecue[[  À Position(m_UrlRecue,"/")-1 ]])
       
       _ExtraireParametres()
      type : 458752

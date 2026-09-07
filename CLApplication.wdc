@@ -28,6 +28,8 @@ class :
       	m_CodeReponse					est un tableau associatif de buffers 
       	m_MonitoringServeur				est un CLMonitoring
       	m_GestionnaireSSL				est CLGestionnaireSSL dynamique
+      	// Module de sécurité et authentification centralisé
+      	m_Securite						est CLSecurite dynamique
       fin
       
      type : 131072
@@ -70,32 +72,53 @@ class :
       a_SocketRecu:AnalyserRequete()
       
       LOCAL
-      	l_UriDemande est une chaîne = a_SocketRecu:m_UrlRecue
+      	l_UriDemande est une chaîne = a_SocketRecu.m_UrlRecue
       	
-      	// ==============================================================================
-      	// ROUTAGE DES REQUÊTES (Compatible WinDev 25)
-      	// ==============================================================================
-      	
-      // Route 0 : Validation automatique du Challenge ACME Let's Encrypt (Priorité Absolue)
+      // Route 0 : Challenge ACME Let's Encrypt (Priorité absolue)
       SI Position(l_UriDemande, ".well-known/acme-challenge/", 1, SansCasse) = 1 ALORS
       	_TraiterRequeteAcmeChallenge(a_SocketRecu)
       	
-      	// Route 1 : API Métriques de Supervision RaaD Ops
+      	// Route 0.1 : Authentification Login
+      SINON SI Position(l_UriDemande, "/api/auth/login", 1, SansCasse) = 1 ALORS
+      	_TraiterAuthentificationLogin(a_SocketRecu)
+      	
+      	// Route 1 : Supervision Système
       SINON SI Position(l_UriDemande, "api/v1/monitoring/systeme", 1, SansCasse) = 1 ALORS
-      	_TraiterRequeteMonitoring(a_SocketRecu)
+      	SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
+      		_GenererReponseErreur(a_SocketRecu, 401, "Accès refusé.")
+      	SINON
+      		_TraiterRequeteMonitoring(a_SocketRecu)
+      	FIN
       	
-      	// Route 2 : ORM et Données REST
+      	// Route 2 : Données REST et ORM
       SINON SI Position(l_UriDemande, "api/v1/data/", 1, SansCasse) = 1 ALORS
-      	_TraiterRequeteApi(a_SocketRecu)
+      	SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
+      		_GenererReponseErreur(a_SocketRecu, 401, "Session invalide ou jeton absent.")
+      	SINON
+      		_TraiterRequeteApi(a_SocketRecu)
+      	FIN
       	
-      	// Route 3 : Requêtes SQL directes
+      	// Route 3 : SQL direct
       SINON SI Position(l_UriDemande, "api/v1/sql", 1, SansCasse) = 1 ALORS
-      	_ExecuterRequeteSQL(a_SocketRecu)
+      	SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
+      		_GenererReponseErreur(a_SocketRecu, 401, "Accès SQL refusé.")
+      	SINON
+      		_ExecuterRequeteSQL(a_SocketRecu)
+      	FIN
       	
-      	// Route 4 : Fichiers statiques WWW
+      	// Route 4 : Diagnostic Mémoire
+      SINON SI Position(l_UriDemande, "api/v1/memoire", 1, SansCasse) = 1 ALORS
+      	SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
+      		_GenererReponseErreur(a_SocketRecu, 401, "Accès refusé.")
+      	SINON
+      		_GetMemory(a_SocketRecu)
+      	FIN
+      	
+      	// Route 5 : Fichiers statiques WWW
       SINON
       	_ObtenirFichier(a_SocketRecu)
       FIN
+      
       
       a_SocketRecu:GenererReponse()
       
@@ -108,18 +131,6 @@ class :
       
       m_MonitoringServeur:EnregistrerRequete(l_CodeStatut, l_LatenceMs)
       m_MonitoringServeur:DecrementerSocketsActifs()
-     type : 458752
-   -
-     name : Execute
-     procedure_id : 1466997623856337504
-     type_code : 12
-     code : |1+
-      
-      procédure Execute()
-      
-      
-      
-      
      type : 458752
    -
      name : TachePlanifiee
@@ -151,12 +162,18 @@ class :
       m_Base				= allouer un CLBase
       m_Base.Initialisation(m_Configuration, m_Journal)
       
-      // 5. Initialisation et Vérification Proactive des Certificats SSL Let's Encrypt
+      // 5. Initialisation du module de sécurité et amorçage automatique de la table
+      m_Securite = allouer un CLSecurite(m_Configuration, m_Base, m_Journal)
+      SI PAS m_Securite.InitialiserSocleSecurite() ALORS
+      	m_Journal.LogErreur("[CRITIQUE] Impossible d'initialiser le socle de sécurité.")
+      FIN
+      
+      // 6. Initialisation et Vérification Proactive des Certificats SSL Let's Encrypt
       m_GestionnaireSSL = allouer un CLGestionnaireSSL(m_Configuration, m_Journal)
       m_GestionnaireSSL.InitialiserCertificats()
       m_GestionnaireSSL.DemarrerSurveillance()
       
-      // 6. Configuration et Démarrage du Socket Serveur
+      // 7. Configuration et Démarrage du Socket Serveur
       m_ServeurSocket								= allouer un CLServeurSocket
       m_ServeurSocket.m_ProcedureRappel			= MessageRecu
       m_ServeurSocket.P_PortSocket				= Val(m_Configuration.LireParametreServeur("Port", "8080"))
@@ -408,7 +425,7 @@ class :
       QUAND EXCEPTION DANS
       	
       	
-      	SELON a_SocketRecu.m_TypeReq
+      	SELON a_SocketRecu.m_TypeRequete
       		CAS "GET" :
       			// On lit directement le paramètre fraîchement assigné
       			SI a_SocketRecu.m_Parametres["valkey"] = "" Ou  a_SocketRecu.m_Parametres["valkey"] = eot ALORS
@@ -490,6 +507,61 @@ class :
       	a_SocketRecu.m_ContenuBuffer	= "Challenge introuvable."
       	a_SocketRecu.m_Extension		= ".txt"
       FIN
+      
+     type : 458752
+   -
+     name : _TraiterAuthentificationLogin
+     procedure_id : 1917956996525251992
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Contrôleur REST : Authentifie les identifiants et délivre le JWT Bearer + Cookie.
+      /// </summary>
+      PROCÉDURE PRIVÉE _TraiterAuthentificationLogin(a_SocketRecu est un CLCanalSocket)
+      
+      LOCAL
+      	l_JsonEntrant	est un Variant
+      	l_Identifiant	est une chaîne	= ""
+      	l_MotDePasse	est une chaîne	= ""
+      	l_JetonAcces	est une chaîne	= ""
+      	l_ReponseJson	est un Variant
+      	
+      SI a_SocketRecu.m_TypeRequete <> "POST" ALORS
+      	_GenererReponseErreur(a_SocketRecu, 405, "Méthode POST obligatoire.")
+      	RETOUR
+      FIN
+      
+      QUAND EXCEPTION DANS
+      	l_JsonEntrant	= JSONVersVariant(a_SocketRecu.m_ContenuBuffer)
+      	l_Identifiant	= SansEspace(l_JsonEntrant.identifiant)
+      	l_MotDePasse	= l_JsonEntrant.mot_de_passe
+      FAIRE
+      	_GenererReponseErreur(a_SocketRecu, 400, "Corps JSON invalide.")
+      	RETOUR
+      FIN
+      
+      // Vérification dynamique en base via la classe CLSecurite
+      SI PAS m_Securite.VerifierIdentifiants(l_Identifiant, l_MotDePasse) ALORS
+      	_GenererReponseErreur(a_SocketRecu, 401, "Identifiants invalides.")
+      	RETOUR
+      FIN
+      
+      // Génération du jeton JWT éphémère (durée : 120 minutes)
+      l_JetonAcces = m_Securite.GenererJeton(l_Identifiant, 120)
+      
+      // Cookie HttpOnly pour les applications Web
+      a_SocketRecu.AjouterEnteteReponse("Set-Cookie", ChaîneConstruit("RAAD_SESSION=%1; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=7200", l_JetonAcces))
+      
+      // Réponse JSON pour Mobile, Desktop et Scripts
+      l_ReponseJson.statut					= "succes"
+      l_ReponseJson.token_type				= "Bearer"
+      l_ReponseJson.access_token				= l_JetonAcces
+      l_ReponseJson.expires_in				= 7200
+      l_ReponseJson.utilisateur				= l_Identifiant
+      
+      a_SocketRecu.m_CodeReponse				= "200 OK"
+      a_SocketRecu.m_TypeContenuPersonnalise	= "application/json; charset=utf-8"
+      a_SocketRecu.m_ContenuBuffer			= VariantVersJSON(l_ReponseJson)
       
      type : 458752
   procedure_templates : []

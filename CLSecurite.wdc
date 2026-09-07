@@ -1,0 +1,445 @@
+#To edit and compare internal_properties, use WINDEV integrated tools.
+#Internal properties refer to the properties of controls in windows, reports, etc.
+info :
+ name : CLSecurite
+ major_version : 25
+ minor_version : 0
+ type : 4
+ description : ""
+ subtype : 0
+class :
+ identifier : 0x1a9d49350040c68d
+ internal_properties : BQAAAAUAAAB2/vstTMCJbS/hlxjFxirSqKvCUuv8YxgpWyl7S3iA
+ code_elements :
+  type_code : 10
+  p_codes :
+   -
+     code : |1+
+      CLSecurite est une Classe
+      	
+      PUBLIC
+      	// Références partagées vers le moteur de RaaD
+      	m_Configuration			est un CLConfiguration dynamique
+      	m_Base					est un CLBase dynamique
+      	m_Journal				est un CLJournalisation dynamique
+      	
+      	// Paramètres de schéma extraits dynamiquement depuis [Securite]
+      	m_NomTableUtilisateurs	est une chaîne
+      	m_RubriqueLogin			est une chaîne
+      	m_RubriqueMotDePasse	est une chaîne
+      	m_TypeHachage			est une chaîne
+      	m_CleSecreteJwt			est une chaîne
+      	m_SelSecurite			est une chaîne
+      	
+      	// Mode Test / Développement
+      	m_ModeTestActif			est un booléen
+      	m_CleTest				est une chaîne
+      	
+      FIN
+     type : 131072
+  procedures :
+   -
+     name : Constructeur
+     procedure_id : 1917769508316104333
+     type_code : 27
+     code : |1-
+      procédure Constructeur(a_Configuration est un CLConfiguration dynamique, a_Base est un CLBase dynamique, a_Journal est un CLJournalisation dynamique)
+      
+      m_Configuration			= a_Configuration
+      m_Base					= a_Base
+      m_Journal				= a_Journal
+      
+      // Extraction via la méthode dédiée du tableau de sécurité
+      m_NomTableUtilisateurs	= m_Configuration.LireParametreSecurite("TableUtilisateurs", "utilisateur")
+      m_RubriqueLogin			= m_Configuration.LireParametreSecurite("RubriqueLogin", "login")
+      m_RubriqueMotDePasse	= m_Configuration.LireParametreSecurite("RubriqueMotDePasse", "mot_de_passe")
+      m_TypeHachage			= Majuscule(m_Configuration.LireParametreSecurite("TypeHachage", "SHA256"))
+      m_CleSecreteJwt			= m_Configuration.LireParametreSecurite("CleSecreteJwt", "RaaD_Secret_Cle_Defaut_2026_ChangezMoi")
+      m_SelSecurite			= m_Configuration.LireParametreSecurite("SelSecurite", "Sel_Securite_RaaD")
+      
+      // Paramétrage du mode test et de la clé de contournement
+      m_ModeTestActif			= (m_Configuration.LireParametreSecurite("ModeTest", "0") = "1")
+      m_CleTest				= m_Configuration.LireParametreSecurite("CleTest", "")
+     type : 589824
+   -
+     name : Destructeur
+     procedure_id : 1917769508316169869
+     type_code : 28
+     code : |1+
+      procédure Destructeur()
+      
+     type : 655360
+   -
+     name : HacherMotDePasse
+     procedure_id : 1917953315737684433
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Hache le mot de passe en appliquant le sel et l'algorithme paramétré dans config.conf.
+      /// </summary>
+      PROCÉDURE HacherMotDePasse(a_MotDePasseEnClair est une chaîne) : chaîne
+      
+      LOCAL
+      	l_ChaineASigner		est une chaîne	= a_MotDePasseEnClair + m_SelSecurite
+      	l_EmpreinteBuffer	est un buffer
+      	
+      SELON m_TypeHachage
+      	CAS "SHA512":
+      		l_EmpreinteBuffer = HashChaîne(HA_SHA_512, l_ChaineASigner)
+      		
+      	CAS "MD5":
+      		// Maintenu pour compatibilité avec d'anciens systèmes
+      		l_EmpreinteBuffer = HashChaîne(HA_MD5_128, l_ChaineASigner)
+      		
+      	CAS "HMAC":
+      		l_EmpreinteBuffer = HashChaîne(HA_HMAC_SHA_256, a_MotDePasseEnClair, m_CleSecreteJwt)
+      		
+      	AUTRE CAS: // SHA256 par défaut
+      		l_EmpreinteBuffer = HashChaîne(HA_SHA_256, l_ChaineASigner)
+      FIN
+      
+      RENVOYER Majuscule(BufferVersHexa(l_EmpreinteBuffer))
+     type : 458752
+   -
+     name : _DecoderBase64Url
+     procedure_id : 1917953345802527869
+     type_code : 12
+     code : |1+
+      PROCÉDURE PRIVÉE _DecoderBase64Url(a_ChaineBase64Url est une chaîne) : chaîne
+      
+      LOCAL
+      	l_ChaineBase64	est une chaîne	= a_ChaineBase64Url
+      	l_Modulo		est un entier
+      	
+      l_ChaineBase64	= Remplace(l_ChaineBase64, "-", "+")
+      l_ChaineBase64	= Remplace(l_ChaineBase64, "_", "/")
+      
+      l_Modulo		= Taille(l_ChaineBase64) modulo 4
+      SI l_Modulo > 0 ALORS
+      	l_ChaineBase64 += Répète("=", 4 - l_Modulo)
+      FIN
+      
+      RENVOYER Décode(l_ChaineBase64, encodeBASE64)
+      
+     type : 458752
+   -
+     name : Nouvelle_Méthode2
+     procedure_id : 1917953367277434885
+     type_code : 12
+     code : |1+
+      procédure Nouvelle_Méthode2()
+      
+     type : 458752
+   -
+     name : InitialiserSocleSecurite
+     procedure_id : 1917953388752276880
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Vérifie la création physique de la table et injecte le compte admin/admin si aucun enregistrement n'existe.
+      /// Ne manipule aucun paramètre de rôle.
+      /// </summary>
+      PROCÉDURE InitialiserSocleSecurite() : booléen
+      
+      LOCAL
+      	l_SourceComptage		est une Source de Données
+      	l_RequeteComptage		est une chaîne
+      	l_NombreEnregistrements	est un entier	= 0
+      	l_RequeteInsertion		est une chaîne
+      	l_SourceInsertion		est une Source de Données
+      	l_MotDePasseHache		est une chaîne
+      	
+      SI m_Journal <> Null ALORS
+      	m_Journal.LogInformation(ChaîneConstruit("[SECURITE] Contrôle de la table de sécurité : %1", m_NomTableUtilisateurs))
+      FIN
+      
+      // 1. Création physique du fichier s'il est déclaré dans l'analyse mais absent du disque
+      HCréationSiInexistant(m_NomTableUtilisateurs)
+      
+      // 2. Décompte des utilisateurs existants
+      l_RequeteComptage = ChaîneConstruit("SELECT COUNT(*) AS Total FROM %1", m_NomTableUtilisateurs)
+      
+      SI PAS HExécuteRequêteSQL(l_SourceComptage, m_Base.m_Connexion, hRequêteDéfaut, l_RequeteComptage) ALORS
+      	SI m_Journal <> Null ALORS
+      		m_Journal.LogErreur(ChaîneConstruit("[SECURITE] Échec de lecture sur %1 : %2", m_NomTableUtilisateurs, HErreurInfo()))
+      	FIN
+      	HAnnuleDéclaration(l_SourceComptage)
+      	RENVOYER Faux
+      FIN
+      
+      HLitPremier(l_SourceComptage)
+      SI PAS HEnDehors(l_SourceComptage) ALORS
+      	l_NombreEnregistrements = Val(l_SourceComptage.Total)
+      FIN
+      HAnnuleDéclaration(l_SourceComptage)
+      
+      // 3. Auto-Seed : Injection de admin / admin si la table est vierge
+      SI l_NombreEnregistrements = 0 ALORS
+      	SI m_Journal <> Null ALORS
+      		m_Journal.LogInformation("[SECURITE] Table vierge. Création automatique du compte par défaut (admin / admin)...")
+      	FIN
+      	
+      	l_MotDePasseHache	= HacherMotDePasse("admin")
+      	
+      	l_RequeteInsertion	= ChaîneConstruit("INSERT INTO %1 (%2, %3) VALUES ({ParamLogin}, {ParamMotDePasse})", ...
+      	m_NomTableUtilisateurs, m_RubriqueLogin, m_RubriqueMotDePasse)
+      	
+      	SI HExécuteRequêteSQL(l_SourceInsertion, m_Base.m_Connexion, hRequêteDéfaut, l_RequeteInsertion) ALORS
+      		{"l_SourceInsertion.ParamLogin", indVariable}      = "admin"
+      		{"l_SourceInsertion.ParamMotDePasse", indVariable} = l_MotDePasseHache
+      		
+      		SI PAS HExécuteRequête(l_SourceInsertion) ALORS
+      			SI m_Journal <> Null ALORS
+      				m_Journal.LogErreur("[SECURITE] Échec de l'insertion de l'administrateur par défaut : " + HErreurInfo())
+      			FIN
+      			HAnnuleDéclaration(l_SourceInsertion)
+      			RENVOYER Faux
+      		FIN
+      		HAnnuleDéclaration(l_SourceInsertion)
+      		
+      		SI m_Journal <> Null ALORS
+      			m_Journal.LogInformation("[SECURITE] Compte administrateur par défaut créé avec succès.")
+      		FIN
+      	SINON
+      		HAnnuleDéclaration(l_SourceInsertion)
+      		RENVOYER Faux
+      	FIN
+      FIN
+      
+      RENVOYER Vrai
+      
+     type : 458752
+   -
+     name : VerifierIdentifiants
+     procedure_id : 1917953564846042709
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Valide le couple login / mot de passe en base de données de manière étanche aux injections SQL.
+      /// </summary>
+      PROCÉDURE VerifierIdentifiants(a_Login est une chaîne, a_MotDePasseEnClair est une chaîne) : booléen
+      
+      LOCAL
+      	l_SourceSQL			est une Source de Données
+      	l_RequeteSQL		est une chaîne
+      	l_EmpreintePasse	est une chaîne
+      	
+      l_EmpreintePasse	= HacherMotDePasse(a_MotDePasseEnClair)
+      
+      // Requête paramétrée exploitant les rubriques dynamiques
+      l_RequeteSQL		= ChaîneConstruit("SELECT %1 FROM %2 WHERE %1 = {ParamLogin} AND %3 = {ParamMotDePasse}", ...
+      m_RubriqueLogin, m_NomTableUtilisateurs, m_RubriqueMotDePasse)
+      
+      SI PAS HExécuteRequêteSQL(l_SourceSQL, m_Base.m_Connexion, hRequêteDéfaut, l_RequeteSQL) ALORS
+      	HAnnuleDéclaration(l_SourceSQL)
+      	RENVOYER Faux
+      FIN
+      
+      {"l_SourceSQL.ParamLogin", indVariable}      = a_Login
+      {"l_SourceSQL.ParamMotDePasse", indVariable} = l_EmpreintePasse
+      
+      SI PAS HExécuteRequête(l_SourceSQL) ALORS
+      	HAnnuleDéclaration(l_SourceSQL)
+      	RENVOYER Faux
+      FIN
+      
+      HLitPremier(l_SourceSQL)
+      SI HEnDehors(l_SourceSQL) ALORS
+      	HAnnuleDéclaration(l_SourceSQL)
+      	RENVOYER Faux
+      FIN
+      
+      HAnnuleDéclaration(l_SourceSQL)
+      RENVOYER Vrai
+      
+     type : 458752
+   -
+     name : GenererJeton
+     procedure_id : 1917953667925281860
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Génère un jeton JWT HMAC-SHA256 éphémère (sans gestion de rôle).
+      /// </summary>
+      PROCÉDURE GenererJeton(a_IdentifiantUtilisateur est une chaîne, a_DureeMinutes est un entier = 120) : chaîne
+      
+      LOCAL
+      	l_EnteteVariant			est un Variant
+      	l_ChargeUtileVariant	est un Variant
+      	l_JsonEntete			est une chaîne
+      	l_JsonChargeUtile		est une chaîne
+      	l_EnteteBase64			est une chaîne
+      	l_ChargeUtileBase64		est une chaîne
+      	l_DonneesASigner		est une chaîne
+      	l_SignatureBuffer		est un buffer
+      	l_SignatureBase64		est une chaîne
+      	l_DateExpiration		est une DateHeure
+      	l_TimestampExpiration	est un entier
+      	
+      // 1. En-tête JWT normalisé
+      l_EnteteVariant.alg			= "HS256"
+      l_EnteteVariant.typ			= "JWT"
+      l_JsonEntete				= VariantVersJSON(l_EnteteVariant)
+      
+      // 2. Charge utile : uniquement l'identifiant et l'expiration
+      l_ChargeUtileVariant.sub	= a_IdentifiantUtilisateur
+      
+      l_DateExpiration			= DateHeureSys()
+      l_DateExpiration..Minute += a_DureeMinutes
+      l_TimestampExpiration		= DateHeureVersEpoch(l_DateExpiration)
+      l_ChargeUtileVariant.exp	= l_TimestampExpiration
+      
+      l_JsonChargeUtile			= VariantVersJSON(l_ChargeUtileVariant)
+      
+      // 3. Encodage Base64Url
+      l_EnteteBase64				= _EncoderBase64Url(l_JsonEntete)
+      l_ChargeUtileBase64			= _EncoderBase64Url(l_JsonChargeUtile)
+      
+      // 4. Signature HMAC-SHA256
+      l_DonneesASigner			= l_EnteteBase64 + "." + l_ChargeUtileBase64
+      l_SignatureBuffer			= HashChaîne(HA_HMAC_SHA_256, l_DonneesASigner, m_CleSecreteJwt)
+      l_SignatureBase64			= _EncoderBase64Url(l_SignatureBuffer)
+      
+      RENVOYER l_DonneesASigner + "." + l_SignatureBase64
+      
+     type : 458752
+   -
+     name : ValiderJeton
+     procedure_id : 1917953758119681158
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Valide mathématiquement l'intégrité et la validité temporelle d'un jeton JWT.
+      /// </summary>
+      PROCÉDURE ValiderJeton(a_Jeton est une chaîne, a_JsonPayloadSortant est une chaîne) : booléen
+      
+      LOCAL
+      	l_Entete				est une chaîne	= ExtraitChaîne(a_Jeton, 1, ".")
+      	l_ChargeUtile			est une chaîne	= ExtraitChaîne(a_Jeton, 2, ".")
+      	l_SignatureRecue		est une chaîne	= ExtraitChaîne(a_Jeton, 3, ".")
+      	l_DonneesASigner		est une chaîne
+      	l_SignatureCalculee		est un buffer
+      	l_SignatureBase64		est une chaîne
+      	l_PayloadVariant		est un Variant
+      	l_TimestampExp			est un entier
+      	l_DateExpiration		est une DateHeure
+      	
+      SI l_Entete = EOT OU l_ChargeUtile = EOT OU l_SignatureRecue = EOT ALORS
+      	RENVOYER Faux
+      FIN
+      
+      // 1. Contrôle de l'authenticité de la signature
+      l_DonneesASigner	= l_Entete + "." + l_ChargeUtile
+      l_SignatureCalculee	= HashChaîne(HA_HMAC_SHA_256, l_DonneesASigner, m_CleSecreteJwt)
+      l_SignatureBase64	= _EncoderBase64Url(l_SignatureCalculee)
+      
+      SI l_SignatureBase64 <> l_SignatureRecue ALORS
+      	RENVOYER Faux
+      FIN
+      
+      // 2. Décodage et contrôle de l'expiration
+      a_JsonPayloadSortant = _DecoderBase64Url(l_ChargeUtile)
+      
+      QUAND EXCEPTION DANS
+      	l_PayloadVariant	= JSONVersVariant(a_JsonPayloadSortant)
+      	l_TimestampExp		= Val(l_PayloadVariant.exp)
+      	
+      	SI l_TimestampExp > 0 ALORS
+      		l_DateExpiration = EpochVersDateHeure(l_TimestampExp)
+      		SI DateHeureSys() > l_DateExpiration ALORS
+      			RENVOYER Faux
+      		FIN
+      	FIN
+      FAIRE
+      	RENVOYER Faux
+      FIN
+      
+      RENVOYER Vrai
+      
+     type : 458752
+   -
+     name : VerifierSecuriteRequete
+     procedure_id : 1917953856904017518
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Videur HTTP centralisé : filtre les routes, valide le mode test (clé bypass) ou le JWT[cite: 4].
+      /// </summary>
+      PROCÉDURE VerifierSecuriteRequete(a_SocketRecu est un CLCanalSocket) : booléen
+      
+      LOCAL
+      	l_UrlRequete			est une chaîne	= a_SocketRecu.m_UrlRecue
+      	l_JetonRecu				est une chaîne	= ""
+      	l_EnteteAutorisation	est une chaîne	= ""
+      	l_ChargeUtileJson		est une chaîne	= ""
+      	l_ChargeUtileVariant	est un Variant
+      	
+      // 1. FAIL-SAFE DEFAULT : Liste blanche publique (Position = 1 en WinDev 25)
+      SI Position(l_UrlRequete, "/api/auth/login", 1, SansCasse) = 1 ALORS renvoyer Vrai
+      SI Position(l_UrlRequete, "/api/v1/data/public/", 1, SansCasse) = 1 ALORS RENVOYER Vrai
+      SI Position(l_UrlRequete, ".well-known/acme-challenge/", 1, SansCasse) = 1 ALORS RENVOYER Vrai
+      
+      // 2. Extraction bicanal : Priorité à l'en-tête Bearer, repli sur le Cookie Web
+      l_EnteteAutorisation = a_SocketRecu.ExtraireEntete("Authorization")
+      
+      SI Position(l_EnteteAutorisation, "Bearer ", 1, SansCasse) = 1 ALORS
+      	l_JetonRecu = SansEspace(Remplace(l_EnteteAutorisation, "Bearer ", "", SansCasse))
+      SINON
+      	l_JetonRecu = a_SocketRecu.ExtraireCookie("RAAD_SESSION")
+      FIN
+      
+      // Blocage immédiat en l'absence de jeton
+      SI l_JetonRecu = "" ALORS RENVOYER Faux
+      
+      // 3. MODE TEST / DÉVELOPPEMENT (Bypass immédiat avec clé dédiée)
+      SI m_ModeTestActif = Vrai ALORS
+      	SI m_CleTest <> "" ET l_JetonRecu = m_CleTest ALORS
+      		a_SocketRecu.m_IdentifiantUtilisateur = "developpeur_test"
+      		RENVOYER Vrai
+      	FIN
+      FIN
+      
+      // 4. Validation cryptographique en RAM (Zéro requête HFSQL)
+      SI PAS ValiderJeton(l_JetonRecu, l_ChargeUtileJson) ALORS
+      	RENVOYER Faux
+      FIN
+      
+      // 5. Attachement de l'identifiant au contexte du thread
+      QUAND EXCEPTION DANS
+      	l_ChargeUtileVariant					= JSONVersVariant(l_ChargeUtileJson)
+      	a_SocketRecu.m_IdentifiantUtilisateur	= l_ChargeUtileVariant.sub
+      FAIRE
+      	RENVOYER Faux
+      FIN
+      
+      renvoyer Vrai
+      
+     type : 458752
+   -
+     name : _EncoderBase64Url
+     procedure_id : 1917953959983257060
+     type_code : 12
+     code : |1+
+      PROCÉDURE PRIVÉE _EncoderBase64Url(a_Donnees est un buffer) : chaîne
+      
+      LOCAL
+      	l_ChaineBase64 est une chaîne = Encode(a_Donnees, encodeBASE64)
+      	
+      l_ChaineBase64	= Remplace(l_ChaineBase64, "+", "-")
+      l_ChaineBase64	= Remplace(l_ChaineBase64, "/", "_")
+      l_ChaineBase64	= Remplace(l_ChaineBase64, "=", "")
+      
+      RENVOYER SansEspace(l_ChaineBase64)
+      
+     type : 458752
+  procedure_templates : []
+  property_templates : []
+ code_parameters :
+  internal_properties : BQAAAAUAAAA6ih3UbgNXHwTtiPSFUEj+2fi/m7v4QV2rqidAupM=
+  original_name : Classe1
+resources :
+ string_res :
+  identifier : 0x1a9d4931003db74b
+  internal_properties : BQAAAAUAAAAnMYFQ1bL/vz9ehh7L22SNNSlIzGTOI8h5F/WtgDNP
+custom_note :
+ internal_properties : BQAAAAUAAABtB9HWVzrXO2+4NDRVK0vmzaNKrCKqH1DBX30lMmGZ
