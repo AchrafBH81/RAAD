@@ -1,0 +1,348 @@
+#To edit and compare internal_properties, use WINDEV integrated tools.
+#Internal properties refer to the properties of controls in windows, reports, etc.
+info :
+ name : CLGestionnaireHttp3
+ major_version : 25
+ minor_version : 0
+ type : 4
+ description : ""
+ subtype : 0
+class :
+ identifier : 0x1aa2d090002c40a0
+ internal_properties : BQAAAAUAAAB2/vstTMCJbS/hlxjFxirSqKvCUuv8YxgpWyl7S3iA
+ code_elements :
+  type_code : 10
+  p_codes :
+   -
+     code : |1+
+      
+      // Classe : CLGestionnaireHttp3
+      // Rôle   : Orchestrateur du pont réseau HTTP/3 (QUIC / UDP 443) via Native AOT
+      
+      CLGestionnaireHttp3 est une Classe
+      	// Références vers le socle applicatif de RaaD
+      	m_Configuration				est un CLConfiguration dynamique
+      	m_Journal					est un CLjournalisation dynamique
+      	
+      	// Chemins physiques des binaires système et des certificats
+      	m_CheminDllBridge			est une chaîne
+      	m_CheminDllMsQuic			est une chaîne
+      	m_CheminCertificatPfx		est une chaîne
+      	m_MotDePassePfx				est une chaîne
+      	
+      	// Paramètres réseau de liaison
+      	m_PortHttp3					est un entier	= 443
+      	m_PortLocalDestination		est un entier	= 8080
+      	
+      	// État d'activité et synchronisation d'accès
+      	m_EstActif					est un booléen	= Faux
+      	m_NomSectionCritique		est une chaîne
+      fin
+     type : 131072
+  procedures :
+   -
+     name : Constructeur
+     procedure_id : 1919325708110086304
+     type_code : 27
+     code : |1+
+      /// <summary>
+      /// Initialise le gestionnaire HTTP/3, résout les chemins binaires et lit la configuration.
+      /// </summary>
+      /// <param name="a_Configuration">Instance active de la configuration unifiée de RaaD.</param>
+      /// <param name="a_Journal">Instance active du système de journalisation.</param>
+      PROCÉDURE Constructeur(a_Configuration est un CLConfiguration dynamique, a_Journal est un CLjournalisation dynamique)
+      
+      m_Configuration			= a_Configuration
+      m_Journal				= a_Journal
+      m_NomSectionCritique	= "SECTION_CRITIQUE_RAAD_HTTP3"
+      
+      // Détermination des chemins physiques dans le répertoire d'exécution
+      m_CheminDllBridge		= ComplèteRep(fRepExe()) + "RaadHttp3Bridge.dll"
+      m_CheminDllMsQuic		= ComplèteRep(fRepExe()) + "msquic.dll"
+      m_CheminCertificatPfx	= ComplèteRep(fRepExe()) + "ssl\serveur_http3.pfx"
+      
+      // Lecture des directives dans la section [serveur] de config.conf
+      m_PortHttp3				= Val(m_Configuration.LireParametreServeur("PortHttp3", "443"))
+      m_PortLocalDestination	= Val(m_Configuration.LireParametreServeur("Port", "8080"))
+      m_MotDePassePfx			= m_Configuration.LireParametreServeur("MotDePassePfx", "RaadQuicSecret2026")
+      
+     type : 589824
+   -
+     name : Destructeur
+     procedure_id : 1919325708110151840
+     type_code : 28
+     code : |1-
+      procédure Destructeur()
+      
+      Arreter()
+      
+      m_Configuration	= Null
+      m_Journal		= Null
+     type : 655360
+   -
+     name : Arreter
+     procedure_id : 1919326197736537022
+     type_code : 12
+     code : |1-
+      /// <summary>
+      /// Coupe l'écoute HTTP/3 et libère les sockets UDP.
+      /// </summary>
+      /// <returns>Vrai si le serveur a été stoppé proprement.</returns>
+      PROCÉDURE Arreter() : booléen
+      
+      LOCAL
+      	l_CodeRetour est un entier
+      	
+      SectionCritiqueDébut(m_NomSectionCritique)
+      
+      SI PAS m_EstActif ALORS
+      	SectionCritiqueFin(m_NomSectionCritique)
+      	RENVOYER Vrai
+      FIN
+      
+      QUAND EXCEPTION DANS
+      	l_CodeRetour = AppelDLL32(m_CheminDllBridge, "ArreterPontHttp3")
+      FAIRE
+      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Erreur lors de l'arrêt du service : %1", ExceptionInfo()))
+      	m_EstActif = Faux
+      	SectionCritiqueFin(m_NomSectionCritique)
+      	RENVOYER Faux
+      FIN
+      
+      m_EstActif = Faux
+      _JournaliserInformation("[HTTP/3] Écouteur QUIC/UDP arrêté avec succès.")
+      
+      SectionCritiqueFin(m_NomSectionCritique)
+      RENVOYER (l_CodeRetour = 0 OU l_CodeRetour = 1)
+      
+      
+      /// <summary>
+      /// Indique si le pont réseau HTTP/3 est actuellement en écoute.
+      /// </summary>
+     type : 458752
+   -
+     name : EstOperationnel
+     procedure_id : 1919326373830302413
+     type_code : 12
+     code : |1+
+      PROCÉDURE EstOperationnel() : booléen
+      
+      RENVOYER m_EstActif
+     type : 458752
+   -
+     name : Demarrer
+     procedure_id : 1919326214916410331
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Démarre le serveur HTTP/3 en validant les dépendances et en convertissant les certificats.
+      /// Exécution 100% silencieuse sans bloquer le thread principal de RaaD.
+      /// </summary>
+      /// <returns>Vrai si le pont écoute sur UDP, Faux en cas d'anomalie.</returns>
+      PROCÉDURE Demarrer() : booléen
+      
+      LOCAL
+      	l_CodeRetour est un entier
+      	
+      SectionCritiqueDébut(m_NomSectionCritique)
+      
+      // Éviter tout double démarrage concurrent
+      SI m_EstActif ALORS
+      	SectionCritiqueFin(m_NomSectionCritique)
+      	RENVOYER Vrai
+      FIN
+      
+      // 1. Validation de l'intégrité de l'environnement (x64 et présence des DLLs)
+      SI PAS _VerifierEnvironnement() ALORS
+      	SectionCritiqueFin(m_NomSectionCritique)
+      	RENVOYER Faux
+      FIN
+      
+      // 2. Préparation du certificat PKCS#12 (.pfx) requis par Kestrel / HTTP/3
+      SI PAS _PreparerCertificat() ALORS
+      	_JournaliserErreur("[HTTP/3] Échec de préparation du certificat TLS. Démarrage abandonné.")
+      	SectionCritiqueFin(m_NomSectionCritique)
+      	RENVOYER Faux
+      FIN
+      
+      // 3. Appel du point d'entrée C natif de RaadHttp3Bridge.dll via AppelDLL32
+      QUAND EXCEPTION DANS
+      	l_CodeRetour = AppelDLL32(m_CheminDllBridge, ...
+      	"DemarrerPontHttp3", ...
+      	&m_CheminCertificatPfx, ...
+      	&m_MotDePassePfx, ...
+      	m_PortHttp3, ...
+      	m_PortLocalDestination)
+      FAIRE
+      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Exception fatale lors de l'appel système DemarrerPontHttp3 : %1", ExceptionInfo()))
+      	SectionCritiqueFin(m_NomSectionCritique)
+      	RENVOYER Faux
+      FIN
+      
+      // Codes de retour : 0 = Démarré avec succès, 1 = Déjà démarré en mémoire
+      SI l_CodeRetour = 0 OU l_CodeRetour = 1 ALORS
+      	m_EstActif = Vrai
+      	_JournaliserInformation(ChaîneConstruit("[HTTP/3] Écouteur QUIC actif sur le port UDP %1 (Relais interne vers TCP %2).", m_PortHttp3, m_PortLocalDestination))
+      	SectionCritiqueFin(m_NomSectionCritique)
+      	RENVOYER Vrai
+      SINON
+      	m_EstActif = Faux
+      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Échec de l'initialisation du serveur Kestrel (Code d'erreur retourné : %1).", l_CodeRetour))
+      	SectionCritiqueFin(m_NomSectionCritique)
+      	RENVOYER Faux
+      FIN
+      
+     type : 458752
+   -
+     name : _VerifierEnvironnement
+     procedure_id : 1919326562808908296
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Vérifie l'architecture d'exécution et la présence physique des DLLs natives indispensables.
+      /// </summary>
+      PROCÉDURE PRIVÉE _VerifierEnvironnement() : booléen
+      
+      // Contrôle de l'architecture 64 bits via la fonction native WinDev 25
+      SI PAS EnMode64Bits() ALORS
+      	_JournaliserErreur("[HTTP/3] Erreur critique : Le processus RaaD s'exécute en 32 bits. La DLL Native AOT requiert un exécutable 64 bits.")
+      	RENVOYER Faux
+      FIN
+      
+      // Vérification de RaadHttp3Bridge.dll
+      SI PAS fFichierExiste(m_CheminDllBridge) ALORS
+      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Binaire manquant : %1 introuvable dans le répertoire d'exécution.", m_CheminDllBridge))
+      	RENVOYER Faux
+      FIN
+      
+      // Vérification du moteur QUIC de Microsoft (msquic.dll)
+      SI PAS fFichierExiste(m_CheminDllMsQuic) ALORS
+      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Dépendance manquante : %1 introuvable. Le transport QUIC/UDP est impossible.", m_CheminDllMsQuic))
+      	RENVOYER Faux
+      FIN
+      
+      RENVOYER Vrai
+      
+     type : 458752
+   -
+     name : _PreparerCertificat
+     procedure_id : 1919326579988846407
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Assure la présence d'un conteneur .pfx valide :
+      /// 1. Convertit les fichiers Let's Encrypt (cert.pem + key.pem) s'ils sont présents.
+      /// 2. Conserve le .pfx existant s'il est déjà généré.
+      /// 3. Génère un .pfx auto-signé de secours si aucun certificat n'est trouvé.
+      /// </summary>
+      PROCÉDURE PRIVÉE _PreparerCertificat() : booléen
+      
+      LOCAL
+      	l_CheminCertPem	est une chaîne
+      	l_CheminClePem	est une chaîne
+      	l_NomDomaine	est une chaîne
+      	l_CodeRetour	est un entier
+      	
+      // Récupération des chemins configurés pour Let's Encrypt
+      l_CheminCertPem	= m_Configuration.m_CheminCertSSL
+      l_CheminClePem	= m_Configuration.m_CheminCleSSL
+      
+      // 1. CAS A : Les fichiers PEM Let's Encrypt sont disponibles sur le disque
+      SI fFichierExiste(l_CheminCertPem) ET fFichierExiste(l_CheminClePem) ALORS
+      	
+      	// Si le PFX n'existe pas ou si le fichier PEM est plus récent (renouvellement Let's Encrypt)
+      	SI PAS fFichierExiste(m_CheminCertificatPfx) OU (fDate(l_CheminCertPem) + fHeure(l_CheminCertPem) > fDate(m_CheminCertificatPfx) + fHeure(m_CheminCertificatPfx)) ALORS
+      		
+      		_JournaliserInformation("[HTTP/3] Conversion du nouveau couple PEM Let's Encrypt vers le conteneur PFX...")
+      		
+      		l_CodeRetour = AppelDLL32(m_CheminDllBridge, ...
+      		"ConvertirPemVersPfx", ...
+      		&l_CheminCertPem, ...
+      		&l_CheminClePem, ...
+      		&m_CheminCertificatPfx, ...
+      		&m_MotDePassePfx)
+      		
+      		SI l_CodeRetour = 0 ALORS
+      			_JournaliserInformation(ChaîneConstruit("[HTTP/3] Conteneur PFX généré avec succès : %1", m_CheminCertificatPfx))
+      			RENVOYER Vrai
+      		SINON
+      			_JournaliserErreur(ChaîneConstruit("[HTTP/3] Échec de conversion PEM vers PFX (Code : %1).", l_CodeRetour))
+      		FIN
+      	SINON
+      		// Le conteneur PFX actuel est déjà à jour
+      		RENVOYER Vrai
+      	FIN
+      FIN
+      
+      // 2. CAS B : Un fichier PFX est déjà physiquement présent sur le disque
+      SI fFichierExiste(m_CheminCertificatPfx) ALORS
+      	RENVOYER Vrai
+      FIN
+      
+      // 3. CAS C : Aucun certificat disponible -> Création d'un certificat auto-signé de secours
+      _JournaliserInformation("[HTTP/3] Aucun certificat TLS détecté. Génération d'un certificat auto-signé RSA de secours...")
+      
+      l_NomDomaine	= m_Configuration.LireParametreServeur("NomDomaine", "localhost")
+      
+      l_CodeRetour	= AppelDLL32(m_CheminDllBridge, ...
+      "GenererPfxAutoSigne", ...
+      &l_NomDomaine, ...
+      &m_CheminCertificatPfx, ...
+      &m_MotDePassePfx, ...
+      365)
+      
+      SI l_CodeRetour = 0 ET fFichierExiste(m_CheminCertificatPfx) ALORS
+      	_JournaliserInformation(ChaîneConstruit("[HTTP/3] Certificat auto-signé créé pour %1 (%2).", l_NomDomaine, m_CheminCertificatPfx))
+      	RENVOYER Vrai
+      SINON
+      	_JournaliserErreur("[HTTP/3] Impossible de générer le certificat auto-signé de secours.")
+      	RENVOYER Faux
+      FIN
+      
+     type : 458752
+   -
+     name : _JournaliserInformation
+     procedure_id : 1919326601463753657
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Journalise un message d'information sans bloquer l'application.
+      /// </summary>
+      PROCÉDURE PRIVÉE _JournaliserInformation(a_Message est une chaîne)
+      
+      SI m_Journal <> Null ALORS
+      	// Tracé applicatif via l'instance de log de RaaD
+      
+      SINON
+      	Trace(a_Message)
+      FIN
+      
+     type : 458752
+   -
+     name : _JournaliserErreur
+     procedure_id : 1919326867751787681
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Journalise un message d'erreur sans lever d'alerte graphique à l'écran.
+      /// </summary>
+      PROCÉDURE PRIVÉE _JournaliserErreur( a_Message est une chaîne )
+      
+      SI m_Journal <> Null ALORS
+      	m_Journal.LogErreur(a_Message)
+      SINON
+      	Trace(a_Message)
+      FIN
+      
+     type : 458752
+  procedure_templates : []
+  property_templates : []
+ code_parameters :
+  internal_properties : BQAAAAUAAAA6ih3UbgNXHwTtiPSFUEj+2fi/m7v4QV2rqidAupM=
+  original_name : Classe1
+resources :
+ string_res :
+  identifier : 0x1aa2d08b00292a0b
+  internal_properties : BQAAAAUAAAAnMYFQ1bL/vz9ehh7L22SNNSlIzGTOI8h5F/WtgDNP
+custom_note :
+ internal_properties : BQAAAAUAAABtB9HWVzrXO2+4NDRVK0vmzaNKrCKqH1DBX30lMmGZ

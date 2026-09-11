@@ -128,7 +128,7 @@ class :
       // =========================================================================
       // On encapsule l'appel dans un ThreadExécute pour que la boucle infinie 
       // du code C# ne bloque pas le démarrage du serveur WLangage.
-      ThreadExécute("Thread_Proxy_HTTPS", threadNormal,_LancerServeurHttpsEntrantAsync)
+      //ThreadExécute("Thread_Proxy_HTTPS", threadNormal,_LancerServeurHttpsEntrantAsync)
       
       
       

@@ -30,6 +30,8 @@ class :
       	m_GestionnaireSSL				est CLGestionnaireSSL dynamique
       	// Module de sécurité et authentification centralisé
       	m_Securite						est CLSecurite dynamique
+      	// [ARCHITECTURE RAAD : NOUVEAU PONT HTTP/3 QUIC]
+      	m_PontHttp3						est un CLGestionnaireHttp3 dynamique
       fin
       
      type : 131072
@@ -202,6 +204,13 @@ class :
       m_ServeurSocket.P_CheminPhpCgi				= m_Configuration.LireParametreServeur("CheminPhpCgi", "")
       m_ServeurSocket.p_NomSocketEcoute			= m_Configuration.LireParametreServeur("NameServer", "SocketRaaD")
       m_ServeurSocket.P_CLconfiguration			= m_Configuration
+      
+      
+      // 8. Initialisation et démarrage du Pont HTTP/3 (QUIC / UDP 443)
+      m_PontHttp3 = allouer un CLGestionnaireHttp3(m_Configuration, m_Journal)
+      SI PAS m_PontHttp3.Demarrer() ALORS
+      	m_Journal.LogErreur("[ALERTE] Le serveur démarre sans le support HTTP/3 (HTTP/1.1 TCP reste actif).")
+      FIN
      type : 458752
    -
      name : _LireEnregistrement

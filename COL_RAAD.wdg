@@ -353,6 +353,124 @@ procedure_set :
       }
      language : "C#"
      type : 458752
+   -
+     name : Nouvelle_Procédure
+     procedure_id : 1919310675747264423
+     type_code : 15
+     code : |1-
+      procédure Nouvelle_Procédure()
+      
+      // ==============================================================================
+      // Événement : Clic sur BTN_TesterDllHttp3
+      // Rôle      : Diagnostic complet du chargement dynamique de RaadHttp3Bridge.dll
+      // Version   : WinDev 25 Strict
+      // Nomenclature : Préfixes de portée (l_), zéro préfixe de type
+      // ==============================================================================
+      
+      LOCAL
+      	l_CheminRepertoireExe	est une chaîne
+      	l_CheminDllBridge		est une chaîne
+      	l_CheminDllMsQuic		est une chaîne
+      	l_IdentifiantModule		est un entier système
+      	l_CodeRetour			est un entier
+      	l_CodeErreurSysteme		est un entier
+      	l_MessageTrace			est une chaîne
+      	
+      l_CheminRepertoireExe	= ComplèteRep(fRepExe())
+      l_CheminDllBridge		= l_CheminRepertoireExe + "RaadHttp3Bridge.dll"
+      l_CheminDllMsQuic		= l_CheminRepertoireExe + "msquic.dll"
+      
+      Trace("=================================================================")
+      Trace("[DIAGNOSTIC HTTP/3] Démarrage de la vérification de la DLL native")
+      Trace("=================================================================")
+      
+      // ------------------------------------------------------------------------------
+      // ÉTAPE 1 : CONTRÔLE DE L'ARCHITECTURE DU PROCESSUS EN COURS (32 BITS VS 64 BITS)
+      // ------------------------------------------------------------------------------
+      
+      
+      // ------------------------------------------------------------------------------
+      // ÉTAPE 2 : CONTRÔLE DE PRÉSENCE PHYSIQUE DES FICHIERS DANS LE DOSSIER D'EXÉCUTION
+      // ------------------------------------------------------------------------------
+      SI PAS fFichierExiste(l_CheminDllBridge) ALORS
+      	l_MessageTrace = ChaîneConstruit("ÉCHEC : Fichier introuvable sur le disque : %1", l_CheminDllBridge)
+      	Trace(l_MessageTrace)
+      	Erreur(l_MessageTrace)
+      	RETOUR
+      FIN
+      Trace(" Fichier RaadHttp3Bridge.dll présent.")
+      
+      SI PAS fFichierExiste(l_CheminDllMsQuic) ALORS
+      	l_MessageTrace = ChaîneConstruit("ATTENTION : msquic.dll est absente du répertoire : %1" + RC + ...
+      	"Le chargement de la DLL peut échouer si cette dépendance QUIC n'est pas trouvée.", l_CheminRepertoireExe)
+      	Trace(l_MessageTrace)
+      SINON
+      	Trace("Dépendance msquic.dll présente.")
+      FIN
+      
+      // ------------------------------------------------------------------------------
+      // ÉTAPE 3 : TEST DE CHARGEMENT EN MÉMOIRE (ChargeDLL / LoadLibrary Win32)
+      // ------------------------------------------------------------------------------
+      // ChargeDLL force le chargement immédiat du binaire et résout ses dépendances
+      l_IdentifiantModule = ChargeDLL(l_CheminDllBridge)
+      
+      SI l_IdentifiantModule = 0 ALORS
+      	l_CodeErreurSysteme = ErreurInfo(errCode)
+      	
+      	// Analyse des codes d'erreurs Windows standards
+      	SELON l_CodeErreurSysteme
+      		CAS 193:
+      			l_MessageTrace = "Erreur OS 193 (0xC1) : Format incorrect." + RC + ...
+      			"Incompatibilité entre l'exécutable WinDev et l'architecture de la DLL (x86 vs x64)."
+      		CAS 126:
+      			l_MessageTrace = "Erreur OS 126 (0x7E) : Module introuvable." + RC + ...
+      			"La DLL est présente mais une dépendance C++ ou msquic.dll est introuvable."
+      		AUTRE CAS:
+      			l_MessageTrace = ChaîneConstruit("Erreur de chargement DLL (Code système: %1) : %2", l_CodeErreurSysteme, ErreurInfo(errMessage))
+      	FIN
+      	
+      	Trace(l_MessageTrace)
+      	Erreur(l_MessageTrace)
+      	RETOUR
+      FIN
+      Trace(ChaîneConstruit(" DLL chargée avec succès en mémoire (Handle système : %1).", l_IdentifiantModule))
+      
+      // ------------------------------------------------------------------------------
+      // ÉTAPE 4 : APPEL DU POINT D'ENTRÉE C NATIF (AppelDLL32)
+      // ------------------------------------------------------------------------------
+      // On invoque "ArreterPontHttp3" : cette fonction C ne prend aucun paramètre,
+      // ne modifie aucun fichier et renvoie 1 si le serveur Kestrel est inactif (repos).
+      QUAND EXCEPTION DANS
+      	l_CodeRetour = AppelDLL32(l_CheminDllBridge, "ArreterPontHttp3")
+      FAIRE
+      	l_MessageTrace = "EXCEPTION lors de l'appel du point d'entrée 'ArreterPontHttp3' :" + RC + ExceptionInfo()
+      	Trace(l_MessageTrace)
+      	DéchargeDLL(l_IdentifiantModule)
+      	Erreur(l_MessageTrace)
+      	RETOUR
+      FIN
+      
+      // ------------------------------------------------------------------------------
+      // ÉTAPE 5 : DÉCHARGEMENT PROPRE DU MODULE DE TEST
+      // ------------------------------------------------------------------------------
+      DéchargeDLL(l_IdentifiantModule)
+      
+      // ------------------------------------------------------------------------------
+      // ÉTAPE 6 : BILAN DU DIAGNOSTIC
+      // ------------------------------------------------------------------------------
+      // Les codes prévus pour ArreterPontHttp3 sont : 0 = Arrêté, 1 = Déjà inactif
+      SI l_CodeRetour = 0 OU l_CodeRetour = 1 ALORS
+      	l_MessageTrace = ChaîneConstruit("SUCCÈS TOTAL !" + RC + ...
+      	"RaadHttp3Bridge.dll est chargée et exécutée sans erreur par WinDev 25." + RC + ...
+      	"Point d'entrée 'ArreterPontHttp3' validé (Code retour : %1).", l_CodeRetour)
+      	Trace(l_MessageTrace)
+      	Info(l_MessageTrace)
+      SINON
+      	l_MessageTrace = ChaîneConstruit("ATTENTION : La DLL a répondu mais avec un code d'erreur inattendu : %1", l_CodeRetour)
+      	Trace(l_MessageTrace)
+      	Avertissement(l_MessageTrace)
+      FIN
+     type : 458752
   procedure_templates : []
   property_templates : []
  code_parameters :
