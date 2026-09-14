@@ -80,6 +80,9 @@ class :
       	fRepCrée(m_CheminRepertoireSSL)
       FIN
       
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Gestionnaire SSL initialisé (Contact: %1, Alerte: %2 jours, Prod: %3).", m_CourrielContact, m_NombreJoursAlerte, (m_ModeProduction ? "Oui" SINON "Non")), "", "INFO")
+      FIN
      type : 589824
    -
      name : Destructeur
@@ -94,6 +97,9 @@ class :
       
       // Libération de la table des challenges ACME
       SupprimeTout(m_TableauChallenges)
+      
+      m_Configuration	= Null
+      m_Journal		= Null
      type : 655360
    -
      name : InitialiserCertificats
@@ -113,7 +119,7 @@ class :
       // 1. Vérification de l'existence des fichiers PEM sur le disque
       SI PAS fFichierExiste(m_CheminCertificat) OU PAS fFichierExiste(m_CheminClePrivee) ALORS
       	SI m_Journal <> Null ALORS
-      		m_Journal.LogErreur("[SSL] Aucun certificat détecté sur le disque. Initialisation de la génération automatique...")
+      		m_Journal.EnregistrerErreur("Aucun certificat TLS détecté sur le disque. Initialisation de la génération automatique...", "", "AVERTISSEMENT")
       	FIN
       	RENVOYER GenererNouveauCertificat()
       FIN
@@ -123,21 +129,20 @@ class :
       
       SI l_JoursRestants < 0 ALORS
       	SI m_Journal <> Null ALORS
-      		m_Journal.LogErreur("[SSL] Le certificat actuel est corrompu ou déjà expiré. Régénération immédiate...")
+      		m_Journal.EnregistrerErreur("Le certificat TLS actuel est corrompu ou déjà expiré. Régénération immédiate...", "", "AVERTISSEMENT")
       	FIN
       	RENVOYER GenererNouveauCertificat()
       SINON SI l_JoursRestants <= m_NombreJoursAlerte ALORS
       	SI m_Journal <> Null ALORS
-      		m_Journal.LogErreur(ChaîneConstruit("[SSL] Le certificat expire dans %1 jour(s) (Seuil d'alerte : %2 jours). Renouvellement pro-actif...", l_JoursRestants, m_NombreJoursAlerte))
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Le certificat TLS expire dans %1 jour(s) (Seuil d'alerte : %2 jours). Renouvellement pro-actif...", l_JoursRestants, m_NombreJoursAlerte), "", "AVERTISSEMENT")
       	FIN
       	RENVOYER GenererNouveauCertificat()
       SINON
       	SI m_Journal <> Null ALORS
-      		m_Journal.LogErreur(ChaîneConstruit("[SSL] Certificat TLS actif et valide. Expiration dans %1 jour(s).", l_JoursRestants))
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Certificat TLS actif et valide. Expiration dans %1 jour(s).", l_JoursRestants), "", "INFO")
       	FIN
       	RENVOYER Vrai
       FIN
-      
      type : 458752
    -
      name : DemarrerSurveillance
@@ -149,9 +154,12 @@ class :
       /// </summary>
       PROCÉDURE DemarrerSurveillance()
       
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur("Démarrage du thread de surveillance périodique du certificat SSL (Thread_Surveillance_SSL).", "", "INFO")
+      FIN
+      
       // Exécution du thread de fond selon les standards WinDev 25 (threadNormal)
       ThreadExécute("Thread_Surveillance_SSL", threadNormal, _SurveillerExpirationThread)
-      
      type : 458752
    -
      name : GenererNouveauCertificat
@@ -171,6 +179,9 @@ class :
       	
       // Éviter l'exécution de deux processus de génération simultanés
       SI m_RenouvellementEnCours ALORS
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur("Demande de génération de certificat ignorée : un renouvellement est déjà en cours.", "", "AVERTISSEMENT")
+      	FIN
       	RENVOYER Faux
       FIN
       
@@ -183,14 +194,14 @@ class :
       	
       	SI l_ListeDomainesCsv = "" ALORS
       		SI m_Journal <> Null ALORS
-      			m_Journal.LogErreur("[SSL] Échec : Aucun domaine public valide n'est défini dans la section [vhost].")
+      			m_Journal.EnregistrerErreur("Échec SSL : Aucun domaine public valide n'est défini dans la section [vhost].", "", "ERREUR")
       		FIN
       		m_RenouvellementEnCours = Faux
       		RENVOYER Faux
       	FIN
       	
       	SI m_Journal <> Null ALORS
-      		m_Journal.LogErreur(ChaîneConstruit("[SSL] Démarrage de la génération pour les hôtes : %1", l_ListeDomainesCsv))
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Démarrage de la génération du certificat Let's Encrypt pour les hôtes : %1", l_ListeDomainesCsv), "", "INFO")
       	FIN
       	
       	// 2. Appel de la procédure C# autonome BouncyCastle
@@ -203,13 +214,13 @@ class :
       	
       	SI l_ResultatEmission ALORS
       		SI m_Journal <> Null ALORS
-      			m_Journal.LogErreur("[SSL] Nouveau certificat TLS et clé privée enregistrés avec succès.")
+      			m_Journal.EnregistrerErreur("Nouveau certificat TLS et clé privée enregistrés avec succès.", "", "INFO")
       		FIN
       		m_RenouvellementEnCours = Faux
       		RENVOYER Vrai
       	SINON
       		SI m_Journal <> Null ALORS
-      			m_Journal.LogErreur("[SSL] Échec de l'émission du certificat dans le composant C#.")
+      			m_Journal.EnregistrerErreur("Échec de l'émission du certificat Let's Encrypt dans le composant C# (COL_RAAD).", "", "ERREUR")
       		FIN
       		m_RenouvellementEnCours = Faux
       		RENVOYER Faux
@@ -218,7 +229,7 @@ class :
       FAIRE
       	l_MessageErreur = ExceptionInfo(errComplet)
       	SI m_Journal <> Null ALORS
-      		m_Journal.LogErreur(ChaîneConstruit("[SSL] Exception critique lors de la génération du certificat : %1", l_MessageErreur))
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Exception critique lors de la génération du certificat TLS : %1", l_MessageErreur), "", "CRITIQUE", l_MessageErreur)
       	FIN
       	m_RenouvellementEnCours = Faux
       	RENVOYER Faux
@@ -236,8 +247,14 @@ class :
       /// <param name="a_ReponseCle">Autorisation cryptographique associée (token.thumbprint).</param>
       PROCÉDURE EnregistrerChallenge(a_Jeton est une chaîne, a_ReponseCle est une chaîne)
       
-      m_TableauChallenges[SansEspace(a_Jeton)] = SansEspace(a_ReponseCle)
+      LOCAL
+      	l_JetonNettoye est une chaîne = SansEspace(a_Jeton)
       
+      m_TableauChallenges[l_JetonNettoye] = SansEspace(a_ReponseCle)
+      
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Challenge ACME HTTP-01 enregistré en mémoire pour le jeton '%1'.", l_JetonNettoye), "", "INFO")
+      FIN
      type : 458752
    -
      name : NettoyerChallenge
@@ -255,8 +272,10 @@ class :
       	
       SI m_TableauChallenges[l_JetonNettoye]..Existe ALORS
       	Supprime(m_TableauChallenges, l_JetonNettoye)
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Challenge ACME HTTP-01 libéré pour le jeton '%1'.", l_JetonNettoye), "", "INFO")
+      	FIN
       FIN
-      
      type : 458752
    -
      name : ObtenirReponseChallenge
@@ -276,9 +295,11 @@ class :
       SI m_TableauChallenges[l_JetonNettoye]..Existe ALORS
       	RENVOYER m_TableauChallenges[l_JetonNettoye]
       SINON
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Demande de challenge ACME inconnue ou expirée pour le jeton '%1'.", l_JetonNettoye), "", "AVERTISSEMENT")
+      	FIN
       	RENVOYER ""
       FIN
-      
      type : 458752
    -
      name : _SurveillerExpirationThread
@@ -303,15 +324,17 @@ class :
       		
       		SI l_JoursRestants <= m_NombreJoursAlerte ALORS
       			SI m_Journal <> Null ALORS
-      				m_Journal.LogErreur(ChaîneConstruit("[SSL-Tâche] Déclenchement automatique du renouvellement (%1 jour(s) restants).", l_JoursRestants))
+      				m_Journal.EnregistrerErreur(ChaîneConstruit("Surveillance SSL : Déclenchement automatique du renouvellement (%1 jour(s) restant(s)).", l_JoursRestants), "", "AVERTISSEMENT")
       			FIN
       			GenererNouveauCertificat()
       		FIN
       	FAIRE
-      		// Traitement silencieux pour ne jamais crasher le thread de surveillance
+      		// Traitement silencieux : enregistrement de l'incident sans crasher le thread de fond
+      		SI m_Journal <> Null ALORS
+      			m_Journal.EnregistrerErreur("Exception non interceptée dans le thread de surveillance SSL.", "", "ERREUR", ExceptionInfo(errComplet))
+      		FIN
       	FIN
       FIN
-      
      type : 458752
    -
      name : _ExtraireDomainesVHost
@@ -359,7 +382,6 @@ class :
       FIN
       
       RENVOYER l_ChaineResultat
-      
      type : 458752
   procedure_templates : []
   property_templates : []

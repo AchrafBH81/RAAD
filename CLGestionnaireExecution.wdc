@@ -1,0 +1,513 @@
+#To edit and compare internal_properties, use WINDEV integrated tools.
+#Internal properties refer to the properties of controls in windows, reports, etc.
+info :
+ name : CLGestionnaireExterne
+ major_version : 25
+ minor_version : 0
+ type : 4
+ description : ""
+ subtype : 0
+class :
+ identifier : 0x1bf4829a002498ec
+ internal_properties : BQAAAAUAAAB2/vstTMCJbS/hlxjFxirSqKvCUuv8YxgpWyl7S3iA
+ code_elements :
+  type_code : 10
+  p_codes :
+   -
+     code : |1+
+      CLGestionnaireExterne est une Classe
+      	
+      	// Membres de configuration et dépendances d'infrastructure
+      	m_Configuration				est CLConfiguration dynamique
+      	m_Journal					est CLJournalisation dynamique
+      	
+      	// Chemins d'accès aux binaires d'interprétation et au pont natif AOT
+      	m_CheminDllPont				est une chaîne
+      	m_CheminPhpCgi				est une chaîne
+      	m_CheminPython				est une chaîne
+      	m_CheminNode				est une chaîne
+      	m_CheminPowerShell			est une chaîne
+      	m_CheminLua					est une chaîne
+      	m_TimeoutDefautMs			est un entier
+      	
+      FIN
+     type : 131072
+  procedures :
+   -
+     name : Constructeur
+     procedure_id : 1942318491823101160
+     type_code : 27
+     code : |1+
+      PROCÉDURE Constructeur(a_Configuration est CLConfiguration dynamique = Null, a_Journal est CLJournalisation dynamique = Null)
+      
+      m_Configuration = a_Configuration
+      m_Journal       = a_Journal
+      
+      // Localisation de la passerelle native AOT dans le répertoire de l'exécutable
+      m_CheminDllPont = m_Configuration.m_RepertoireRacineExe + "RaadProcessBridge.dll"
+      
+      // Résolution des chemins depuis la configuration centralisée
+      SI m_Configuration <> Null ALORS
+      	m_CheminPhpCgi     = m_Configuration.m_RepertoireRacineExe + "\bin\" + m_Configuration.LireParametreServeur("CheminPhpCgi", "C:\php\php-cgi.exe")
+      	m_CheminPython     = m_Configuration.m_RepertoireRacineExe + "\bin\" + m_Configuration.LireParametreServeur("CheminPython", "C:\Python311\python.exe")
+      	m_CheminNode       = m_Configuration.m_RepertoireRacineExe + "\bin\" +m_Configuration.LireParametreServeur("CheminNode", "C:\Program Files\nodejs\node.exe")
+      	m_CheminPowerShell = m_Configuration.m_RepertoireRacineExe + "\bin\" +m_Configuration.LireParametreServeur("CheminPowerShell", "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+      	m_CheminLua        = m_Configuration.m_RepertoireRacineExe + "\bin\" +m_Configuration.LireParametreServeur("CheminLua", "C:\Program Files\Lua\lua.exe")
+      	m_TimeoutDefautMs  = Val(m_Configuration.LireParametreServeur("TimeoutScriptsMs", "5000"))
+      	SI m_TimeoutDefautMs <= 0 ALORS
+      		m_TimeoutDefautMs = 5000
+      	FIN
+      SINON
+      	m_CheminPhpCgi     = "C:\php\php-cgi.exe"
+      	m_CheminPython     = "C:\Python311\python.exe"
+      	m_CheminNode       = "C:\Program Files\nodejs\node.exe"
+      	m_CheminPowerShell = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+      	m_CheminLua        = "C:\Program Files\Lua\lua.exe"
+      	m_TimeoutDefautMs  = 5000
+      FIN
+     type : 589824
+   -
+     name : Destructeur
+     procedure_id : 1942318491823101161
+     type_code : 28
+     code : |1+
+      PROCÉDURE Destructeur()
+      
+      m_Configuration = Null
+      m_Journal       = Null
+     type : 655360
+   -
+     name : ExecuterScript
+     procedure_id : 1942318491823101162
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Méthode : ExecuterScript
+      // Rôle    : Aiguille la requête vers le moteur approprié et valorise CLCanalSocket
+      // ==============================================================================
+      PROCÉDURE ExecuterScript(a_SocketCanal est CLCanalSocket, a_CheminScriptPhysique est une chaîne) : booléen
+      
+      LOCAL
+      	l_ExtensionFichier est une chaîne
+      
+      // 1. Contrôle d'existence du fichier physique sur disque
+      SI PAS fFichierExiste(a_CheminScriptPhysique) ALORS
+      	a_SocketCanal.m_CodeReponse   = "404 Not Found"
+      	a_SocketCanal.m_extension     = ".txt"
+      	a_SocketCanal.m_ContenuBuffer = "Le script demandé est introuvable."
+      	RENVOYER Faux
+      FIN
+      
+      l_ExtensionFichier = Minuscule(fExtraitChemin(a_CheminScriptPhysique, fExtension))
+      
+      // 2. Contrôle de présence de la DLL native AOT (non requise pour WLangage)
+      SI l_ExtensionFichier <> ".wl" ET l_ExtensionFichier <> ".wlangage" ALORS
+      	SI PAS fFichierExiste(m_CheminDllPont) ALORS
+      		_JournaliserErreur(ChaîneConstruit("Passerelle CGI absente : '%1'", m_CheminDllPont), a_SocketCanal.m_NomHote, "CRITIQUE")
+      		a_SocketCanal.m_CodeReponse   = "500 Internal Server Error"
+      		a_SocketCanal.m_extension     = ".txt"
+      		a_SocketCanal.m_ContenuBuffer = "Composant d'exécution système (RaadProcessBridge.dll) indisponible."
+      		RENVOYER Faux
+      	FIN
+      FIN
+      
+      // 3. Routage vers l'interpréteur dédié
+      SELON l_ExtensionFichier
+      	// Exécution native WLangage in-process
+      	CAS ".wl", ".wlangage":
+      		RENVOYER _ExecuterCodeWLangage(a_SocketCanal, a_CheminScriptPhysique)
+      
+      	// Interpréteur PHP via CGI
+      	CAS ".php":
+      		RENVOYER _ExecuterViaBridgeDll(a_SocketCanal, m_CheminPhpCgi, a_CheminScriptPhysique, "", "PHP")
+      
+      	// Interpréteur Python (-u : E/S non bufferisées)
+      	CAS ".py":
+      		RENVOYER _ExecuterViaBridgeDll(a_SocketCanal, m_CheminPython, a_CheminScriptPhysique, "-u", "Python")
+      
+      	// JavaScript Node.js
+      	CAS ".js", ".mjs":
+      		RENVOYER _ExecuterViaBridgeDll(a_SocketCanal, m_CheminNode, a_CheminScriptPhysique, "", "NodeJS")
+      
+      	// PowerShell non-interactif sécurisé
+      	CAS ".ps1":
+      		RENVOYER _ExecuterViaBridgeDll(a_SocketCanal, m_CheminPowerShell, a_CheminScriptPhysique, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File", "PowerShell")
+      
+      	// Scripts Lua légers
+      	CAS ".lua":
+      		RENVOYER _ExecuterViaBridgeDll(a_SocketCanal, m_CheminLua, a_CheminScriptPhysique, "", "Lua")
+      
+      	AUTRE CAS:
+      		a_SocketCanal.m_CodeReponse   = "415 Unsupported Media Type"
+      		a_SocketCanal.m_extension     = ".txt"
+      		a_SocketCanal.m_ContenuBuffer = ChaîneConstruit("Format de script non supporté : '%1'.", l_ExtensionFichier)
+      		RENVOYER Faux
+      FIN
+     type : 458752
+   -
+     name : _ExecuterCodeWLangage
+     procedure_id : 1942318491823101164
+     type_code : 12
+     code : |1-
+      // ==============================================================================
+      // Méthode : _ExecuterCodeWLangage
+      // Rôle    : Exécution native WLangage en mémoire vive (ExécuteCode)
+      // ==============================================================================
+      PROCÉDURE PRIVÉE _ExecuterCodeWLangage(a_SocketCanal est CLCanalSocket, a_CheminScriptPhysique est une chaîne) : booléen
+      
+      LOCAL
+      	l_CodeSource est une chaîne
+      	l_Resultat   est une chaîne
+      
+      l_CodeSource = fChargeTexte(a_CheminScriptPhysique)
+      SI ErreurDétectée OU l_CodeSource = "" ALORS
+      	a_SocketCanal.m_CodeReponse   = "500 Internal Server Error"
+      	a_SocketCanal.m_extension     = ".txt"
+      	a_SocketCanal.m_ContenuBuffer = "Erreur de lecture du script WLangage."
+      	RENVOYER Faux
+      FIN
+      
+      QUAND EXCEPTION DANS
+      	l_Resultat = ExécuteCode(l_CodeSource)
+      FAIRE
+      	_JournaliserErreur(ChaîneConstruit("Exception WLangage dans '%1' : %2", a_CheminScriptPhysique, ExceptionInfo(errMessage)), a_SocketCanal.m_NomHote, "ERREUR", ExceptionInfo(errComplet))
+      	a_SocketCanal.m_CodeReponse   = "500 Internal Server Error"
+      	a_SocketCanal.m_extension     = ".json"
+      	a_SocketCanal.m_ContenuBuffer = ChaîneConstruit("{""erreur"": ""Erreur WLangage : %1""}", ExceptionInfo(errMessage))
+      	RENVOYER Faux
+      FIN
+      
+      a_SocketCanal.m_CodeReponse   = "200 OK"
+      a_SocketCanal.m_ContenuBuffer = l_Resultat
+      
+      SI Position(SansEspace(l_Resultat), "{") = 1 OU Position(SansEspace(l_Resultat), "[") = 1 ALORS
+      	a_SocketCanal.m_extension = ".json"
+      SINON
+      	a_SocketCanal.m_extension = ".html"
+      FIN
+      
+      RENVOYER Vrai
+      // ==============================================================================
+      // Méthode : _ExecuterViaBridgeDll
+      // Rôle    : Délégation à RaadProcessBridge.dll par tampons mémoires thread-safe
+      //          et séparation étanche du flux CGI (Option 2 stricte).
+      // ==============================================================================
+     type : 458752
+   -
+     name : _ExecuterViaBridgeDll
+     procedure_id : 1920512154177316263
+     type_code : 12
+     code : |1-
+      PROCÉDURE PRIVÉE _ExecuterViaBridgeDll(a_SocketCanal est CLCanalSocket, ...
+      a_Executable			est une chaîne, ...
+      a_CheminScriptPhysique	est une chaîne, ...
+      a_ArgumentsOptionnels	est une chaîne, ...
+      a_NomTechnologie		est une chaîne) : booléen
+      
+      LOCAL
+      	l_MethodeHttp			est une chaîne
+      	l_QueryString			est une chaîne	= ""
+      	l_CorpsRequete			est une chaîne
+      	l_ContentType			est une chaîne	= ""
+      	
+      	// Tampons mémoires locaux isolés par thread (2 Mo sortie, 64 Ko erreur)
+      	l_TailleMaxSortie		est un entier	= 2097152
+      	l_BufferSortie			est une chaîne	= Répète(Caract(0), l_TailleMaxSortie)
+      	l_TailleReelleSortie	est un entier	= 0
+      	
+      	l_TailleMaxErreur		est un entier	= 65536
+      	l_BufferErreur			est une chaîne	= Répète(Caract(0), l_TailleMaxErreur)
+      	l_TailleReelleErreur	est un entier	= 0
+      	
+      	l_CodeRetour			est un entier
+      	l_SortieTexte			est une chaîne
+      	l_ErreurTexte			est une chaîne
+      	
+      	// Variables dédiées au découpage du protocole CGI
+      	l_PositionSeparateur	est un entier
+      	l_TailleSeparateur		est un entier
+      	l_BlocEntetes			est une chaîne
+      	l_NombreLignes			est un entier
+      	l_IndiceLigne			est un entier
+      	l_LigneEntete			est une chaîne
+      	l_PositionDeuxPoints	est un entier
+      	l_CleEntete				est une chaîne
+      	l_ValeurEntete			est une chaîne
+      	
+      // 1. Contrôle préalable de présence de l'exécutable
+      SI PAS fFichierExiste(a_Executable) ALORS
+      	_JournaliserErreur(ChaîneConstruit("[%1] Binaire introuvable : %2", a_NomTechnologie, a_Executable), a_SocketCanal.m_NomHote, "CRITIQUE")
+      	a_SocketCanal.m_CodeReponse		= "500 Internal Server Error"
+      	a_SocketCanal.m_extension		= ".txt"
+      	a_SocketCanal.m_ContenuBuffer	= ChaîneConstruit("L'interpréteur %1 est absent du serveur.", a_NomTechnologie)
+      	RENVOYER Faux
+      FIN
+      
+      // 2. Extraction des métadonnées HTTP requises par le protocole CGI
+      l_MethodeHttp = (a_SocketCanal.m_TypeRequete <> "" ? a_SocketCanal.m_TypeRequete SINON "GET")
+      
+      SI Position(a_SocketCanal.m_UrlRecue, "?") > 0 ALORS
+      	l_QueryString = a_SocketCanal.m_UrlRecue[[Position(a_SocketCanal.m_UrlRecue, "?") + 1 À]]
+      FIN
+      
+      l_CorpsRequete = a_SocketCanal.m_CorpsRequete
+      
+      SI a_SocketCanal.m_Parametres["content-type"]..Existe ALORS
+      	l_ContentType = a_SocketCanal.m_Parametres["content-type"]
+      SINON SI a_SocketCanal.m_Parametres["Content-Type"]..Existe ALORS
+      	l_ContentType = a_SocketCanal.m_Parametres["Content-Type"]
+      FIN
+      
+      // 3. Appel de la passerelle native AOT x64 via AppelDLL32
+      QUAND EXCEPTION DANS
+      	l_CodeRetour = AppelDLL32(m_CheminDllPont, ...
+      	"ExecuterProcessusCgi", ...
+      	&a_Executable, ...
+      	&a_CheminScriptPhysique, ...
+      	&a_ArgumentsOptionnels, ...
+      	&l_MethodeHttp, ...
+      	&l_QueryString, ...
+      	&l_CorpsRequete, ...
+      	&l_ContentType, ...
+      	m_TimeoutDefautMs, ...
+      	&l_BufferSortie, ...
+      	l_TailleMaxSortie, ...
+      	&l_TailleReelleSortie, ...
+      	&l_BufferErreur, ...
+      	l_TailleMaxErreur, ...
+      	&l_TailleReelleErreur)
+      FAIRE
+      	_JournaliserErreur(ChaîneConstruit("[%1] Échec appel pont AOT : %2", a_NomTechnologie, ExceptionInfo(errMessage)), a_SocketCanal.m_NomHote, "CRITIQUE", ExceptionInfo(errComplet))
+      	a_SocketCanal.m_CodeReponse		= "500 Internal Server Error"
+      	a_SocketCanal.m_extension		= ".txt"
+      	a_SocketCanal.m_ContenuBuffer	= "Erreur interne du sous-système d'exécution."
+      	RENVOYER Faux
+      FIN
+      
+      // 4. Récupération des flux textuels selon les tailles réelles retournées
+      SI l_TailleReelleSortie > 0 ALORS
+      	l_SortieTexte = Gauche(l_BufferSortie, l_TailleReelleSortie)
+      SINON
+      	l_SortieTexte = ""
+      FIN
+      
+      SI l_TailleReelleErreur > 0 ALORS
+      	l_ErreurTexte = Gauche(l_BufferErreur, l_TailleReelleErreur)
+      SINON
+      	l_ErreurTexte = ""
+      FIN
+      
+      // 5. Gestion des codes d'erreur renvoyés par le processus
+      SI l_CodeRetour <> 0 ALORS
+      	_JournaliserErreur(ChaîneConstruit("[%1] Échec script '%2' (Code %3) : %4", a_NomTechnologie, a_CheminScriptPhysique, l_CodeRetour, l_ErreurTexte), a_SocketCanal.m_NomHote, "ERREUR")
+      	a_SocketCanal.m_CodeReponse		= "500 Internal Server Error"
+      	a_SocketCanal.m_extension		= ".txt"
+      	a_SocketCanal.m_ContenuBuffer	= ChaîneConstruit("Erreur d'exécution %1 : %2", a_NomTechnologie, (l_ErreurTexte <> "" ? l_ErreurTexte SINON "Échec processus."))
+      	RENVOYER Faux
+      FIN
+      
+      // 6. Recherche du délimiteur d'en-têtes HTTP/CGI direct sur le flux brut (sans altération préalable)
+      // Standard Windows CRLF + CRLF (\r\n\r\n = 4 octets)
+      l_PositionSeparateur = Position(l_SortieTexte, Caract(13) + Caract(10) + Caract(13) + Caract(10))
+      SI l_PositionSeparateur > 0 ALORS
+      	l_TailleSeparateur = 4
+      SINON
+      	// Standard Unix LF + LF (\n\n = 2 octets)
+      	l_PositionSeparateur = Position(l_SortieTexte, Caract(10) + Caract(10))
+      	SI l_PositionSeparateur > 0 ALORS
+      		l_TailleSeparateur = 2
+      	SINON
+      		// Standard Mac classique CR + CR (\r\r = 2 octets)
+      		l_PositionSeparateur = Position(l_SortieTexte, Caract(13) + Caract(13))
+      		SI l_PositionSeparateur > 0 ALORS
+      			l_TailleSeparateur = 2
+      		FIN
+      	FIN
+      FIN
+      
+      // 7. Séparation étanche : le buffer ne reçoit que le corps applicatif épuré
+      SI l_PositionSeparateur > 0 ALORS
+      	l_BlocEntetes					= Gauche(l_SortieTexte, l_PositionSeparateur - 1)
+      	a_SocketCanal.m_ContenuBuffer	= Milieu(l_SortieTexte, l_PositionSeparateur + l_TailleSeparateur)
+      SINON
+      	l_BlocEntetes					= ""
+      	a_SocketCanal.m_ContenuBuffer	= l_SortieTexte
+      FIN
+      
+      // Extension HTML par défaut
+      a_SocketCanal.m_extension = ".html"
+      
+      // 8. Analyse des en-têtes CGI pour valoriser les membres existants de CLCanalSocket
+      SI l_BlocEntetes <> "" ALORS
+      	l_NombreLignes = ChaîneOccurrence(l_BlocEntetes, Caract(10)) + 1
+      	
+      	POUR l_IndiceLigne = 1 À l_NombreLignes
+      		l_LigneEntete	= SansEspace(ExtraitChaîne(l_BlocEntetes, l_IndiceLigne, Caract(10)))
+      		l_LigneEntete	= Remplace(l_LigneEntete, Caract(13), "")
+      		
+      		SI l_LigneEntete = "" ALORS
+      			CONTINUER
+      		FIN
+      		
+      		l_PositionDeuxPoints = Position(l_LigneEntete, ":")
+      		SI l_PositionDeuxPoints > 0 ALORS
+      			l_CleEntete		= Minuscule(SansEspace(Gauche(l_LigneEntete, l_PositionDeuxPoints - 1)))
+      			l_ValeurEntete	= SansEspace(Milieu(l_LigneEntete, l_PositionDeuxPoints + 1))
+      			
+      			SELON l_CleEntete
+      				// Statut HTTP émis par le script (ex: "Status: 404 Not Found")
+      				CAS "status":
+      					a_SocketCanal.m_CodeReponse = l_ValeurEntete
+      					
+      				// Mappage du type MIME sur la propriété existante m_extension
+      				CAS "content-type":
+      					SI Position(Minuscule(l_ValeurEntete), "application/json") > 0 ALORS
+      						a_SocketCanal.m_extension = ".json"
+      					SINON SI Position(Minuscule(l_ValeurEntete), "text/xml") > 0 ALORS
+      						a_SocketCanal.m_extension = ".xml"
+      					SINON SI Position(Minuscule(l_ValeurEntete), "text/plain") > 0 ALORS
+      						a_SocketCanal.m_extension = ".txt"
+      					SINON SI Position(Minuscule(l_ValeurEntete), "javascript") > 0 ALORS
+      						a_SocketCanal.m_extension = ".js"
+      					SINON SI Position(Minuscule(l_ValeurEntete), "css") > 0 ALORS
+      						a_SocketCanal.m_extension = ".css"
+      					SINON
+      						a_SocketCanal.m_extension = ".html"
+      					FIN
+      			FIN
+      		FIN
+      	FIN
+      FIN
+      
+      SI a_SocketCanal.m_CodeReponse = "" ALORS
+      	a_SocketCanal.m_CodeReponse = "200 OK"
+      FIN
+      
+      RENVOYER Vrai
+     type : 458752
+   -
+     name : _JournaliserErreur
+     procedure_id : 1942318491823101167
+     type_code : 12
+     code : |1-
+      PROCÉDURE PRIVÉE _JournaliserErreur(a_Message est une chaîne, a_NomVHost est une chaîne, a_Gravite est une chaîne = "ERREUR", a_ContexteException est une chaîne = "")
+      
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(a_Message, a_NomVHost, a_Gravite, a_ContexteException)
+      SINON
+      	Trace(ChaîneConstruit("[%1] [%2] %3 %4", a_Gravite, a_NomVHost, a_Message, a_ContexteException))
+      FIN
+      /// <summary>
+      /// Découpe la sortie standard CGI : élimine les en-têtes bruts du buffer HTML et mappe le Content-Type vers m_extension.
+      /// Version stricte pour CLCanalSocket (sans m_EntetesAdditionnels).
+      /// </summary>
+      /// <param name="a_SocketCanal">Instance active du canal socket client.</param>
+      /// <param name="a_SortieBruteCgi">Sortie standard brute émise par php-cgi.exe.</param>
+     type : 458752
+   -
+     name : _TraiterSortieCgi
+     procedure_id : 1920509306613860413
+     type_code : 12
+     code : |1-
+      PROCÉDURE PRIVÉE _TraiterSortieCgi(a_SocketCanal est CLCanalSocket, a_SortieBruteCgi est une chaîne)
+      
+      LOCAL
+      	l_PositionSeparateur	est un entier
+      	l_TailleSeparateur		est un entier
+      	l_BlocEntetes			est une chaîne
+      	l_CorpsReponse			est une chaîne
+      	l_NombreLignes			est un entier
+      	l_IndiceLigne			est un entier
+      	l_LigneEntete			est une chaîne
+      	l_PositionDeuxPoints	est un entier
+      	l_CleEntete				est une chaîne
+      	l_ValeurEntete			est une chaîne
+      	
+      // Extension par défaut
+      a_SocketCanal.m_extension	= ".html"
+      
+      // 1. Détection de la fin des en-têtes HTTP (CRLF+CRLF sous Windows ou LF+LF sous Unix)
+      l_PositionSeparateur		= Position(a_SortieBruteCgi, Caract(13) + Caract(10) + Caract(13) + Caract(10))
+      SI l_PositionSeparateur > 0 ALORS
+      	l_TailleSeparateur = 4
+      SINON
+      	l_PositionSeparateur = Position(a_SortieBruteCgi, Caract(10) + Caract(10))
+      	SI l_PositionSeparateur > 0 ALORS
+      		l_TailleSeparateur = 2
+      	SINON
+      		l_PositionSeparateur = Position(a_SortieBruteCgi, Caract(13) + Caract(13))
+      		SI l_PositionSeparateur > 0 ALORS
+      			l_TailleSeparateur = 2
+      		FIN
+      	FIN
+      FIN
+      
+      // 2. Repli : si aucun en-tête n'est trouvé, injection brute
+      SI l_PositionSeparateur <= 0 ALORS
+      	a_SocketCanal.m_ContenuBuffer = a_SortieBruteCgi
+      	SI a_SocketCanal.m_CodeReponse = "" ALORS
+      		a_SocketCanal.m_CodeReponse = "200 OK"
+      	FIN
+      	RETOUR
+      FIN
+      
+      // 3. Séparation étanche : seul le contenu HTML pur est injecté dans le buffer (les en-têtes disparaissent de l'écran)
+      l_BlocEntetes					= Gauche(a_SortieBruteCgi, l_PositionSeparateur - 1)
+      l_CorpsReponse					= Milieu(a_SortieBruteCgi, l_PositionSeparateur + l_TailleSeparateur)
+      a_SocketCanal.m_ContenuBuffer	= l_CorpsReponse
+      
+      // 4. Lecture des en-têtes pour renseigner les membres existants de CLCanalSocket
+      l_NombreLignes					= ChaîneOccurrence(l_BlocEntetes, Caract(10)) + 1
+      
+      POUR l_IndiceLigne = 1 À l_NombreLignes
+      	l_LigneEntete	= SansEspace(ExtraitChaîne(l_BlocEntetes, l_IndiceLigne, Caract(10)))
+      	l_LigneEntete	= Remplace(l_LigneEntete, Caract(13), "")
+      	
+      	SI l_LigneEntete = "" ALORS
+      		CONTINUER
+      	FIN
+      	
+      	l_PositionDeuxPoints = Position(l_LigneEntete, ":")
+      	SI l_PositionDeuxPoints > 0 ALORS
+      		l_CleEntete		= Minuscule(SansEspace(Gauche(l_LigneEntete, l_PositionDeuxPoints - 1)))
+      		l_ValeurEntete	= SansEspace(Milieu(l_LigneEntete, l_PositionDeuxPoints + 1))
+      		
+      		SELON l_CleEntete
+      			// Statut HTTP émis par le script (ex: "Status: 404 Not Found")
+      			CAS "status":
+      				a_SocketCanal.m_CodeReponse = l_ValeurEntete
+      				
+      			// Typage MIME transmis via m_extension
+      			CAS "content-type":
+      				SI Position(Minuscule(l_ValeurEntete), "application/json") > 0 ALORS
+      					a_SocketCanal.m_extension = ".json"
+      				SINON SI Position(Minuscule(l_ValeurEntete), "text/xml") > 0 ALORS
+      					a_SocketCanal.m_extension = ".xml"
+      				SINON SI Position(Minuscule(l_ValeurEntete), "text/plain") > 0 ALORS
+      					a_SocketCanal.m_extension = ".txt"
+      				SINON SI Position(Minuscule(l_ValeurEntete), "javascript") > 0 ALORS
+      					a_SocketCanal.m_extension = ".js"
+      				SINON SI Position(Minuscule(l_ValeurEntete), "css") > 0 ALORS
+      					a_SocketCanal.m_extension = ".css"
+      				SINON
+      					a_SocketCanal.m_extension = ".html"
+      				FIN
+      		FIN
+      	FIN
+      FIN
+      
+      SI a_SocketCanal.m_CodeReponse = "" ALORS
+      	a_SocketCanal.m_CodeReponse = "200 OK"
+      FIN
+     type : 458752
+  procedure_templates : []
+  property_templates : []
+ code_parameters :
+  internal_properties : BQAAAAUAAAA6ih3UbgNXHwTtiPSFUEj+2fi/m7v4QV2rqidAupM=
+  original_name : Classe1
+resources :
+ string_res :
+  identifier : 0x1bf48290002179bc
+  internal_properties : BQAAAAUAAAAnMYFQ1bL/vz9ehh7L22SNNSlIzGTOI8h5F/WtgDNP
+custom_note :
+ internal_properties : BQAAAAUAAABtB9HWVzrXO2+4NDRVK0vmzaNKrCKqH1DBX30lMmGZ

@@ -18,20 +18,27 @@ class :
       CLApplication est une Classe
       	
       prive
-      	//m_PortSocket		est un entier  	
+      	// Infrastructure réseau Socket TCP
       	m_ServeurSocket					est CLServeurSocket dynamique 
       	m_CanalSocket					est CLCanalSocket dynamique 			
-      	//m_FichierIni				est CLIniFichier dynamique
+      	
+      	// Services d'infrastructure RaaD
       	m_Configuration					est CLConfiguration dynamique
       	m_Journal						est CLjournalisation dynamique
-      	m_Base							est CLBase dynamique  
-      	m_CodeReponse					est un tableau associatif de buffers 
       	m_MonitoringServeur				est un CLMonitoring
       	m_GestionnaireSSL				est CLGestionnaireSSL dynamique
-      	// Module de sécurité et authentification centralisé
       	m_Securite						est CLSecurite dynamique
-      	// [ARCHITECTURE RAAD : NOUVEAU PONT HTTP/3 QUIC]
       	m_PontHttp3						est un CLGestionnaireHttp3 dynamique
+      	
+      	// Couche d'accès aux données HFSQL
+      	m_Base							est CLBase dynamique  
+      	m_CodeReponse					est un tableau associatif de buffers 
+      	
+      	// Moteur autonome de cache mémoire (RAM)
+      	m_Cache							est ClCache dynamique
+      	
+      	// Gestionnaire d'exécution polyglotte (PHP, Python, WLangage, Node.js, PowerShell, Lua)
+      	m_GestionnaireExterne			est CLGestionnaireExterne dynamique
       fin
       
      type : 131072
@@ -40,13 +47,11 @@ class :
      name : Constructeur
      procedure_id : 1465886919539326189
      type_code : 27
-     code : |1-
+     code : |1+
       procédure Constructeur()
       
       _Init()
       m_ServeurSocket.Demarre()
-      
-      	
      type : 589824
    -
      name : Destructeur
@@ -55,12 +60,7 @@ class :
      code : |1-
       procédure Destructeur()
       
-      // ==============================================================================
-      // Méthode : MessageRecu (CLApplication.wdc)
-      // Rôle    : Point d'entrée de chaque socket threadé avec normalisation d'URL,
-      //           videur de sécurité et télémétrie de latence intégrée
-      // Version : WinDev 25 Strict
-      // ==============================================================================
+      arret()
      type : 655360
    -
      name : MessageRecu
@@ -75,6 +75,9 @@ class :
       	l_DureeEcoulee		est une Durée
       	l_LatenceMs			est un réel
       	l_CodeStatut		est un entier
+      	l_TailleOctets		est un entier sur 8 octets
+      	l_NomVHost			est une chaîne
+      	l_UserAgent			est une chaîne
       	
       // 1. TÉLÉMÉTRIE : Incrémentation du compteur de connexions concurrentes
       m_MonitoringServeur.IncrementerSocketsActifs()
@@ -88,6 +91,10 @@ class :
       	l_UriDemande = "/" + l_UriDemande
       FIN
       
+      // Résolution préventive des métadonnées pour le cloisonnement et les journaux
+      l_NomVHost  = a_SocketRecu.m_NomHote
+      l_UserAgent = a_SocketRecu.m_UserAgent
+      
       // ==============================================================================
       // AIGUILLAGE DU ROUTEUR REST (Position = 1 stricte WinDev 25)
       // ==============================================================================
@@ -96,41 +103,50 @@ class :
       SI Position(l_UriDemande, "/.well-known/acme-challenge/", 1, SansCasse) = 1 ALORS
       	_TraiterRequeteAcmeChallenge(a_SocketRecu)
       	
-      	// Route 0.1 : Authentification Login (Délivre le JWT sans vérification préalable)
+      // Route 0.1 : Authentification Login (Délivre le JWT sans vérification préalable)
       SINON SI Position(l_UriDemande, "/api/auth/login", 1, SansCasse) = 1 ALORS
       	_TraiterAuthentificationLogin(a_SocketRecu)
       	
-      	// Route 1 : Supervision Système (Protégée par token ou clé test)
+      // Route 1 : Supervision Système (Protégée par token ou clé test)
       SINON SI Position(l_UriDemande, "/api/v1/monitoring/systeme", 1, SansCasse) = 1 ALORS
       	SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
-      		a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
-      		a_SocketRecu.m_Extension		= "json"
-      		a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Accès non autorisé.""}"
+      		a_SocketRecu.m_CodeReponse   = "401 Unauthorized"
+      		a_SocketRecu.m_extension     = ".json"
+      		a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Accès non autorisé.""}"
+      		SI m_Journal <> Null ALORS
+      			m_Journal.EnregistrerErreur(ChaîneConstruit("Tentative d'accès non autorisée au monitoring système depuis l'IP %1", a_SocketRecu.m_AdresseIp), l_NomVHost, "SECURITE")
+      		FIN
       	SINON
       		_TraiterRequeteMonitoring(a_SocketRecu)
       	FIN
       	
-      	// Route 2 : Données REST et ORM HFSQL (Protégée par token ou clé test)
+      // Route 2 : Données REST et ORM HFSQL (Protégée par token ou clé test)
       SINON SI Position(l_UriDemande, "/api/v1/data/", 1, SansCasse) = 1 ALORS
       	SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
-      		a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
-      		a_SocketRecu.m_Extension		= "json"
-      		a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Session invalide ou jeton absent.""}"
+      		a_SocketRecu.m_CodeReponse   = "401 Unauthorized"
+      		a_SocketRecu.m_extension     = ".json"
+      		a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Session invalide ou jeton absent.""}"
+      		SI m_Journal <> Null ALORS
+      			m_Journal.EnregistrerErreur(ChaîneConstruit("Rejet de sécurité 401 sur l'API REST pour l'URI '%1' (IP: %2)", l_UriDemande, a_SocketRecu.m_AdresseIp), l_NomVHost, "SECURITE")
+      		FIN
       	SINON
       		_TraiterRequeteApi(a_SocketRecu)
       	FIN
       	
-      	// Route 3 : Requêtes SQL Directes (Protégée par token ou clé test)
+      // Route 3 : Requêtes SQL Directes (Protégée par token ou clé test)
       SINON SI Position(l_UriDemande, "/api/v1/sql", 1, SansCasse) = 1 ALORS
       	SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
-      		a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
-      		a_SocketRecu.m_Extension		= "json"
-      		a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Accès SQL refusé.""}"
+      		a_SocketRecu.m_CodeReponse   = "401 Unauthorized"
+      		a_SocketRecu.m_extension     = ".json"
+      		a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Accès SQL refusé.""}"
+      		SI m_Journal <> Null ALORS
+      			m_Journal.EnregistrerErreur(ChaîneConstruit("Rejet de sécurité 401 sur l'exécuteur SQL brut (IP: %1)", a_SocketRecu.m_AdresseIp), l_NomVHost, "SECURITE")
+      		FIN
       	SINON
       		_ExecuterRequeteSQL(a_SocketRecu)
       	FIN
       	
-      	// Route 4 : Fichiers Statiques WWW (Assets publics : html, css, js, images)
+      // Route 4 : Fichiers Statiques et Scripts Polyglottes WWW (html, css, js, php, py, wl, etc.)
       SINON
       	_ObtenirFichier(a_SocketRecu)
       FIN
@@ -143,115 +159,175 @@ class :
       a_SocketRecu.GenererReponse()
       
       // Calcul de la latence d'exécution en millisecondes (Soustraction native DateHeure V25)
-      l_DureeEcoulee	= DateHeureSys() - l_DateHeureDebut
-      l_LatenceMs		= l_DureeEcoulee..EnMillisecondes
+      l_DureeEcoulee = DateHeureSys() - l_DateHeureDebut
+      l_LatenceMs    = l_DureeEcoulee..EnMillisecondes
       
       // Résolution du code statut HTTP numérique pour le monitoring
-      l_CodeStatut	= Val(a_SocketRecu.m_CodeReponse)
+      l_CodeStatut = Val(a_SocketRecu.m_CodeReponse)
       SI l_CodeStatut = 0 ALORS
       	l_CodeStatut = 200
       FIN
       
+      // Évaluation du volume émis sur le réseau
+      l_TailleOctets = Taille(a_SocketRecu.m_ContenuBuffer)
+      
       // Enregistrement des métriques dans le moteur de supervision
       m_MonitoringServeur.EnregistrerRequete(l_CodeStatut, l_LatenceMs)
       m_MonitoringServeur.DecrementerSocketsActifs()
+      
+      // Journalisation asynchrone type Apache dans acces_AAAAMMJJ.log
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerAcces(a_SocketRecu.m_AdresseIp, a_SocketRecu.m_TypeRequete, a_SocketRecu.m_UrlRecue, l_CodeStatut, l_TailleOctets, l_LatenceMs, l_UserAgent, l_NomVHost)
+      FIN
      type : 458752
    -
      name : TachePlanifiee
      procedure_id : 1466999831469385569
      type_code : 12
      code : |1-
-      
       procédure TachePlanifiee()
-      m_ServeurSocket.attenteconnexion()
+      m_ServeurSocket.AttenteConnexion()
      type : 458752
    -
      name : _Init
-     procedure_id : 1467015460854427412
+     procedure_id : 1919767196392143762
      type_code : 12
-     code : |1-
+     code : |1+
+      PROCÉDURE PRIVÉE _Init()
       
-      procédure PRIVÉE _Init()
+      LOCAL
+      	l_CacheActif        est un booléen
+      	l_TtlCache          est un entier
+      	l_SeuilCompression  est un entier
+      	l_SeuilMaxRam       est un entier
+      	l_NomTable          est une chaîne
       
-      // 1. Initialisation de la Journalisation
-      m_Journal			= allouer un CLjournalisation
+      // 1. Initialisation et démarrage immédiat du sous-système de journalisation asynchrone
+      m_Journal = allouer un CLJournalisation
+      m_Journal.Demarrer()
       
-      // 2. Initialisation de la Configuration (source unique de vérité)
-      m_Configuration		= allouer un CLConfiguration()
+      // 2. Initialisation de la Configuration avec injection directe du journal
+      m_Configuration		= allouer un CLConfiguration(m_Journal)
       
-      // 3. Initialisation du Monitoring
-      m_MonitoringServeur	= allouer un CLMonitoring("C:")
+      // 3. Initialisation du Monitoring avec passage du lecteur cible et du journal
+      m_MonitoringServeur	= allouer un CLMonitoring("C:", m_Journal)
       
-      // 4. Initialisation de la Base de Données HFSQL
+      // 4. Lecture des paramètres de pilotage du cache depuis config.conf
+      l_CacheActif       = (m_Configuration.LireParametreServeur("ActiverCache", "1") = "1")
+      l_TtlCache         = Val(m_Configuration.LireParametreServeur("CacheTtlSecondes", "30"))
+      l_SeuilCompression = Val(m_Configuration.LireParametreServeur("SeuilCompressionCache", "4096"))
+      l_SeuilMaxRam      = Val(m_Configuration.LireParametreServeur("SeuilRamMaxPourcentage", "60"))
+      
+      // Instanciation du moteur de cache RAM autonome et démarrage du worker thread
+      m_Cache            = allouer un ClCache(l_TtlCache, l_SeuilMaxRam, l_SeuilCompression, l_CacheActif)
+      m_Cache.Demarrer()
+      
+      // 5. Initialisation de la Base de Données HFSQL
       m_Base				= allouer un CLBase
       m_Base.Initialisation(m_Configuration, m_Journal)
       
-      // 5. Initialisation du module de sécurité et amorçage automatique de la table
-      m_Securite = allouer un CLSecurite(m_Configuration, m_Base, m_Journal)
-      SI PAS m_Securite.InitialiserSocleSecurite() ALORS
-      	m_Journal.LogErreur("[CRITIQUE] Impossible d'initialiser le socle de sécurité.")
+      // 6. Liaison du cache partagé sur l'ensemble des prototypes ORM via l'opérateur <-
+      POUR TOUT l_Prototype, l_NomTable DE m_Base.m_Table
+      	l_Prototype.AssocierCache(m_Cache)
       FIN
       
-      // 6. Initialisation et Vérification Proactive des Certificats SSL Let's Encrypt
+      // Liaison du cache au monitoring pour la télémétrie
+      m_MonitoringServeur.AssocierCache(m_Cache)
+      
+      // 7. Initialisation du module de sécurité et amorçage automatique de la table utilisateurs
+      m_Securite = allouer un CLSecurite(m_Configuration, m_Base, m_Journal)
+      SI PAS m_Securite.InitialiserSocleSecurite() ALORS
+      	m_Journal.EnregistrerErreur("Impossible d'initialiser le socle de sécurité.", "", "CRITIQUE")
+      FIN
+      
+      // 8. Initialisation et vérification proactive des certificats SSL Let's Encrypt
       m_GestionnaireSSL = allouer un CLGestionnaireSSL(m_Configuration, m_Journal)
       m_GestionnaireSSL.InitialiserCertificats()
       m_GestionnaireSSL.DemarrerSurveillance()
       
-      // 7. Configuration et Démarrage du Socket Serveur
-      m_ServeurSocket								= allouer un CLServeurSocket
-      m_ServeurSocket.m_ProcedureRappel			= MessageRecu
-      m_ServeurSocket.P_PortSocket				= Val(m_Configuration.LireParametreServeur("Port", "8080"))
-      m_ServeurSocket.P_CheminPhpCgi				= m_Configuration.LireParametreServeur("CheminPhpCgi", "")
-      m_ServeurSocket.p_NomSocketEcoute			= m_Configuration.LireParametreServeur("NameServer", "SocketRaaD")
-      m_ServeurSocket.P_CLconfiguration			= m_Configuration
+      // 9. Configuration et démarrage de la socket serveur principale
+      m_ServeurSocket						= allouer un CLServeurSocket
+      m_ServeurSocket.m_ProcedureRappel	= MessageRecu
+      m_ServeurSocket.P_PortSocket		= Val(m_Configuration.LireParametreServeur("Port", "8080"))
+      m_ServeurSocket.P_CheminPhpCgi		= m_Configuration.LireParametreServeur("CheminPhpCgi", "")
+      m_ServeurSocket.p_NomSocketEcoute	= m_Configuration.LireParametreServeur("NameServer", "SocketRaaD")
+      m_ServeurSocket.P_CLconfiguration	= m_Configuration
+      m_ServeurSocket.P_CLjournalisation	= m_Journal
       
-      
-      // 8. Initialisation et démarrage du Pont HTTP/3 (QUIC / UDP 443)
-      m_PontHttp3 = allouer un CLGestionnaireHttp3(m_Configuration, m_Journal)
+      // 10. Initialisation et démarrage du Pont HTTP/3 (QUIC / UDP 443)
+      m_PontHttp3							= allouer un CLGestionnaireHttp3(m_Configuration, m_Journal)
       SI PAS m_PontHttp3.Demarrer() ALORS
-      	m_Journal.LogErreur("[ALERTE] Le serveur démarre sans le support HTTP/3 (HTTP/1.1 TCP reste actif).")
+      	m_Journal.EnregistrerErreur("Le serveur démarre sans le support HTTP/3 (HTTP/1.1 TCP reste actif).", "", "AVERTISSEMENT")
       FIN
+      
+      // 11. Initialisation de la classe de gestion d'exécution polyglotte
+      m_GestionnaireExterne				= allouer un CLGestionnaireExterne(m_Configuration, m_Journal)
+      
+      m_Journal.EnregistrerErreur("Initialisation globale de l'application RaaD achevée avec succès.", "", "INFO")
      type : 458752
    -
      name : _LireEnregistrement
      procedure_id : 1473736444733868589
      type_code : 12
      code : |1+
-      procédure prive _LireEnregistrement(L_RequeteHttp est CLCanalSocket)
+      procédure prive _LireEnregistrement(a_SocketRecu est CLCanalSocket, a_IgnorerCache est un booléen = Faux)
       
-      // Affectation par copie 
+      LOCAL
+      	l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
       
-      L_EnregistrementCourant est  clenregistrement
-      L_EnregistrementCourant <= m_Base.m_Table[L_RequeteHttp.m_Parametres["table"]]
+      l_EnregistrementCourant <= m_Base.m_Table[a_SocketRecu.m_Parametres["table"]]
       
-      L_EnregistrementCourant.Charger(L_RequeteHttp.m_Parametres["valkey"],L_RequeteHttp.m_Parametres["condition"])
+      l_EnregistrementCourant.Charger(a_SocketRecu.m_Parametres["valkey"], a_SocketRecu.m_Parametres["condition"], a_IgnorerCache)
       
-      si L_EnregistrementCourant.m_erreur <> "" ALORS
-      	L_RequeteHttp.m_CodeReponse		= "401"
-      	L_RequeteHttp.m_ContenuBuffer	= L_EnregistrementCourant.m_erreur
-      sinon
-      	L_RequeteHttp.m_CodeReponse = "200 OK"
-      	L_RequeteHttp.m_ContenuBuffer = L_EnregistrementCourant.m_json
+      SI l_EnregistrementCourant.m_erreur <> "" ALORS
+      	a_SocketRecu.m_CodeReponse   = "401"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = l_EnregistrementCourant.m_erreur
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Erreur ORM Charger() [Table: %1, Clé: %2] : %3", a_SocketRecu.m_Parametres["table"], a_SocketRecu.m_Parametres["valkey"], l_EnregistrementCourant.m_erreur), a_SocketRecu.m_NomHote, "ERREUR")
+      	FIN
+      SINON
+      	a_SocketRecu.m_CodeReponse   = "200 OK"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = l_EnregistrementCourant.m_json
       FIN
       
-      
-      
+      libérer l_EnregistrementCourant
      type : 458752
    -
      name : _ExecuterRequeteSQL
      procedure_id : 1473738635167241172
      type_code : 12
      code : |1+
-      procédure Privé _ExecuterRequeteSQL(L_RequeteHttp est CLCanalSocket)
+      procédure Privé _ExecuterRequeteSQL(a_SocketRecu est CLCanalSocket)
       
+      LOCAL
+      	l_ChaineRequete    est une chaîne
+      	l_BaseDonneesClone est CLBase dynamique
       
-      L_BaseDonneesClone est CLBase dynamique = allouer CLBase
-      L_BaseDonneesClone <= m_Base
-      
-      ChaineRequete est chaine 
-      ChaineRequete = L_RequeteHttp.m_Parametres["sql"]
-      
-      L_RequeteHttp.m_CodeReponse = "200 OK"
+      QUAND EXCEPTION DANS
+      	l_BaseDonneesClone = allouer CLBase
+      	l_BaseDonneesClone <= m_Base
+      	
+      	l_ChaineRequete = a_SocketRecu.m_Parametres["sql"]
+      	
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Exécution directe SQL demandée : %1", l_ChaineRequete), a_SocketRecu.m_NomHote, "INFO")
+      	FIN
+      	
+      	a_SocketRecu.m_CodeReponse   = "200 OK"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = "{""statut"": ""OK"", ""message"": ""Requête SQL exécutée.""}"
+      	
+      	libérer l_BaseDonneesClone
+      FAIRE
+      	a_SocketRecu.m_CodeReponse   = "500 Internal Server Error"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Échec d'exécution de la requête SQL directe.""}"
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur("Erreur critique durant l'exécution SQL directe.", a_SocketRecu.m_NomHote, "ERREUR", ExceptionInfo(errComplet))
+      	FIN
+      FIN
      type : 458752
    -
      name : _ObtenirFichier
@@ -260,120 +336,163 @@ class :
      code : |1-
       procédure privée _ObtenirFichier(a_RequeteHttp est CLCanalSocket)<métier>
       
-      a_RequeteHttp.ObtenirFichier()
+      LOCAL
+      	l_CheminPur       est une chaîne
+      	l_Extension       est une chaîne
+      	l_CheminRacineWWW est une chaîne
+      	l_CheminPhysique  est une chaîne
+      
+      // 1. Nettoyage des paramètres d'URL (Query String)
+      SI Position(a_RequeteHttp.m_UrlRecue, "?") > 1 ALORS  
+      	l_CheminPur = a_RequeteHttp.m_UrlRecue[[ À Position(a_RequeteHttp.m_UrlRecue, "?") - 1]]
+      SINON
+      	l_CheminPur = a_RequeteHttp.m_UrlRecue
+      FIN
+      
+      // Uniformisation des séparateurs Windows
+      l_CheminPur = Remplace(l_CheminPur, "/", "\")
+      
+      // 2. Blindage anti-directory traversal (CWE-22)
+      SI Position(l_CheminPur, "..") > 0 OU Position(l_CheminPur, ":") > 0 ALORS
+      	a_RequeteHttp.m_CodeReponse   = "403"
+      	a_RequeteHttp.m_extension     = ".html"
+      	a_RequeteHttp.m_ContenuBuffer = m_Configuration.m_TabReponse[403]
+      	
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Tentative de Directory Traversal bloquée [IP: %1, URI: %2]", ...
+      		                            a_RequeteHttp.m_AdresseIp, a_RequeteHttp.m_UrlRecue), a_RequeteHttp.m_NomHote, "SECURITE")
+      	FIN
+      	RETOUR
+      FIN
+      
+      // 3. Page d'accueil par défaut
+      SI l_CheminPur = "" OU l_CheminPur = "\" ALORS
+      	l_CheminPur = "\index.html"
+      FIN
+      
+      SI l_CheminPur[[1]] <> "\" ALORS
+      	l_CheminPur = "\" + l_CheminPur
+      FIN
+      
+      // 4. Extraction rapide de l'extension
+      l_Extension = Minuscule(l_CheminPur[Position(l_CheminPur, ".", 0, DepuisFin) À ])
+      
+      // 5. Résolution physique du document
+      l_CheminRacineWWW = m_Configuration.ObtenirRepertoireWWW(a_RequeteHttp.m_NomHote)
+      l_CheminPhysique  = ComplèteRep(l_CheminRacineWWW) + (l_CheminPur[[2 À ]])
+      
+      // 6. Aiguillage : Scripts polyglottes vs Fichiers statiques
+      SI l_Extension DANS (".php", ".py", ".wl", ".wlangage", ".mjs", ".ps1", ".lua") ALORS
+      	SI m_GestionnaireExterne <> Null ALORS
+      		m_GestionnaireExterne.ExecuterScript(a_RequeteHttp, l_CheminPhysique)
+      		
+      		// Compression à la volée des retours textuels volumineux
+      		SI a_RequeteHttp.m_extension DANS (".html", ".css", ".js", ".txt", ".xml", ".json") ET Taille(a_RequeteHttp.m_ContenuBuffer) > 256 ALORS
+      			a_RequeteHttp.m_ContenuBuffer = Compresse(a_RequeteHttp.m_ContenuBuffer, compresseGZIP)
+      			a_RequeteHttp.m_Gzip          = Vrai
+      		FIN
+      	SINON
+      		a_RequeteHttp.m_CodeReponse   = "500 Internal Server Error"
+      		a_RequeteHttp.m_extension     = ".txt"
+      		a_RequeteHttp.m_ContenuBuffer = "Moteur d'exécution polyglotte indisponible."
+      	FIN
+      SINON
+      	// Fichiers statiques : délégation native à CLCanalSocket
+      	a_RequeteHttp.ObtenirFichier()
+      FIN
      type : 458752
    -
      name : _LireEnregistrements
      procedure_id : 1478385377465361484
      type_code : 12
      code : |1-
-      procédure privée _LireEnregistrements(a_SocketRecu est CLCanalSocket)
+      procédure privée _LireEnregistrements(a_SocketRecu est CLCanalSocket, a_IgnorerCache est un booléen = Faux)
       
-      l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
+      LOCAL
+      	l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
+      
       l_EnregistrementCourant <= m_Base.m_Table[a_SocketRecu.m_Parametres["table"]]
       
-      // On passe un 3ème paramètre : l'opérateur extrait de l'URL
       l_EnregistrementCourant.ChargerCollection(...
       a_SocketRecu.m_Parametres["rubrique"], ...
       a_SocketRecu.m_Parametres["valeur"], ...
-      a_SocketRecu.m_Parametres["operateur"])
+      a_SocketRecu.m_Parametres["operateur"], ...
+      a_IgnorerCache)
       
       SI l_EnregistrementCourant.m_erreur <> "" ALORS
-      	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
-      	a_SocketRecu.m_ContenuBuffer	= l_EnregistrementCourant.m_erreur
+      	a_SocketRecu.m_CodeReponse   = "500 Internal Server Error"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = l_EnregistrementCourant.m_erreur
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Erreur ORM ChargerCollection() [Table: %1, Rubrique: %2] : %3", a_SocketRecu.m_Parametres["table"], a_SocketRecu.m_Parametres["rubrique"], l_EnregistrementCourant.m_erreur), a_SocketRecu.m_NomHote, "ERREUR")
+      	FIN
       SINON
-      	a_SocketRecu.m_CodeReponse		= "200 OK"
-      	a_SocketRecu.m_ContenuBuffer	= l_EnregistrementCourant.m_json
+      	a_SocketRecu.m_CodeReponse   = "200 OK"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = l_EnregistrementCourant.m_json
       FIN
       
       libérer l_EnregistrementCourant
-      
-      
-      //l_resjson = L_RequeteHttp.m_ContenuBuffer
-      //lreschaine est chaine = JSONVersChaîne(l_resjson)
-      //
-      //
-      //sresbuffer est un buffer
-      //Sérialise(L_BaseDonneesClone.ExecuteSQL("SELECT * FROM WBLignePieces where WBLignePieces.IDwb_piece = 110905"),sresbuffer,psdJSON)
-      //
-      //l_resjson = sresbuffer
-      //
-      //l_json est une chaîne = JSONVersChaîne(l_resjson)
-      //
-      //
-      //lres est chaine = lreschaine[[ A Taille(lreschaine)-1]]
-      //
-      //lres += [
-      //,"WBLignePieces":
-      //	{
-      //		"m_Records":
-      //]
-      //
-      //lres += l_resjson
-      //
-      //lres += [
-      //}
-      //}
-      //]
-      //
-      //
-      //
-      //L_RequeteHttp.m_ContenuBuffer = ChaîneVersJSON(lres)
      type : 458752
    -
      name : _ModifierEnregistrement
      procedure_id : 1515318213611328442
      type_code : 12
      code : |1-
-      procédure privée _ModifierEnregistrement(L_RequeteHttp est CLCanalSocket)
+      procédure privée _ModifierEnregistrement(a_SocketRecu est CLCanalSocket)
       
-      L_EnregistrementCourant est un clenregistrement dynamique = allouer un clenregistrement
-      L_EnregistrementCourant <= m_Base.m_Table[L_RequeteHttp.m_Parametres["table"]]
+      LOCAL
+      	l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
       
-      L_EnregistrementCourant.m_json = L_RequeteHttp.m_CorpsRequete
-      L_EnregistrementCourant.Modifier()
+      l_EnregistrementCourant <= m_Base.m_Table[a_SocketRecu.m_Parametres["table"]]
       
-      SI L_EnregistrementCourant.m_erreur <> "" ALORS
-      	L_RequeteHttp.m_CodeReponse		= "401"
-      	L_RequeteHttp.m_ContenuBuffer	= L_EnregistrementCourant.m_erreur
+      l_EnregistrementCourant.m_json = a_SocketRecu.m_CorpsRequete
+      l_EnregistrementCourant.Modifier()
+      
+      SI l_EnregistrementCourant.m_erreur <> "" ALORS
+      	a_SocketRecu.m_CodeReponse   = "400 Bad Request"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = l_EnregistrementCourant.m_erreur
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Erreur ORM Modifier() [Table: %1] : %2", a_SocketRecu.m_Parametres["table"], l_EnregistrementCourant.m_erreur), a_SocketRecu.m_NomHote, "ERREUR")
+      	FIN
       SINON
-      	L_RequeteHttp.m_CodeReponse		= "200 OK"
-      	L_RequeteHttp.m_ContenuBuffer	= L_EnregistrementCourant.m_json
+      	a_SocketRecu.m_CodeReponse   = "200 OK"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = l_EnregistrementCourant.m_json
       FIN
       
-      libérer L_EnregistrementCourant
+      libérer l_EnregistrementCourant
      type : 458752
    -
      name : _CreerEnregistrement
      procedure_id : 1521641157040203827
      type_code : 12
      code : |1+
-      procédure privée _CreerEnregistrement(L_RequeteHttp est CLCanalSocket)
+      procédure privée _CreerEnregistrement(a_SocketRecu est CLCanalSocket)
       
-      // Déclaration d'une instance locale au thread.
-      // L'utilisation de l'opérateur '<=' effectue une affectation par copie (et non par référence).
-      // Cela permet de cloner l'objet "prototype" préchargé dans m_Base.m_Table afin 
-      // d'obtenir une instance physiquement indépendante et propre à cette requête HTTP.
-      // Cela garantit que les données (ex: m_json, m_erreur) ne s'écrasent pas entre deux clients simultanés (Thread-Safe).
+      LOCAL
+      	l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
       
-      // On alloue une VRAIE nouvelle instance totalement isolée en mémoire
-      L_EnregistrementCourant est un clenregistrement dynamique = allouer un clenregistrement
-      L_EnregistrementCourant <= m_Base.m_Table[L_RequeteHttp.m_Parametres["table"]]
+      l_EnregistrementCourant <= m_Base.m_Table[a_SocketRecu.m_Parametres["table"]]
       
+      l_EnregistrementCourant.m_json = a_SocketRecu.m_CorpsRequete
+      l_EnregistrementCourant.Creer()
       
-      
-      L_EnregistrementCourant.m_json = L_RequeteHttp.m_CorpsRequete
-      L_EnregistrementCourant.Creer()
-      
-      SI L_EnregistrementCourant.m_erreur <> "" ALORS
-      	L_RequeteHttp.m_CodeReponse		= "401"
-      	L_RequeteHttp.m_ContenuBuffer	= L_EnregistrementCourant.m_erreur
+      SI l_EnregistrementCourant.m_erreur <> "" ALORS
+      	a_SocketRecu.m_CodeReponse   = "400 Bad Request"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = l_EnregistrementCourant.m_erreur
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Erreur ORM Creer() [Table: %1] : %2", a_SocketRecu.m_Parametres["table"], l_EnregistrementCourant.m_erreur), a_SocketRecu.m_NomHote, "ERREUR")
+      	FIN
       SINON
-      	L_RequeteHttp.m_CodeReponse		= "200 OK"
-      	L_RequeteHttp.m_ContenuBuffer	= L_EnregistrementCourant.m_json
+      	a_SocketRecu.m_CodeReponse   = "201 Created"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = l_EnregistrementCourant.m_json
       FIN
       
-      libérer L_EnregistrementCourant
+      libérer l_EnregistrementCourant
      type : 458752
    -
      name : _SupprimerEnregistrement
@@ -382,32 +501,30 @@ class :
      code : |1-
       procédure privée _SupprimerEnregistrement(a_SocketRecu est CLCanalSocket)
       
+      LOCAL
+      	l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
       
-      
-      // 1. Instanciation dynamique et indépendante (Règle Thread-Safe)
-      l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
       l_EnregistrementCourant <= m_Base.m_Table[a_SocketRecu.m_Parametres["table"]]
       
-      // 2. Aiguillage selon le type de suppression (Unitaire ou Masse)
       SI a_SocketRecu.m_Parametres["valkey"] <> "" ALORS
-      	// Suppression unitaire par Clé Unique / Identifiant
       	l_EnregistrementCourant.SupprimerUnitaire(a_SocketRecu.m_Parametres["valkey"])
       SINON
-      	// Suppression en masse par rubrique + condition
       	l_EnregistrementCourant.SupprimerCollection(a_SocketRecu.m_Parametres["rubrique"], a_SocketRecu.m_Parametres["valeur"])
       FIN
       
-      // 3. Analyse du retour de l'ORM et construction de la réponse HTTP
       SI l_EnregistrementCourant.m_erreur <> "" ALORS
-      	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
-      	a_SocketRecu.m_ContenuBuffer	= l_EnregistrementCourant.m_erreur
+      	a_SocketRecu.m_CodeReponse   = "500 Internal Server Error"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = l_EnregistrementCourant.m_erreur
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Erreur ORM Suppression [Table: %1, Clé: %2] : %3", a_SocketRecu.m_Parametres["table"], a_SocketRecu.m_Parametres["valkey"], l_EnregistrementCourant.m_erreur), a_SocketRecu.m_NomHote, "ERREUR")
+      	FIN
       SINON
-      	// En REST standard, un DELETE réussi renvoie un code 200 avec confirmation ou 204 No Content
-      	a_SocketRecu.m_CodeReponse		= "200 OK"
-      	a_SocketRecu.m_ContenuBuffer	= "{""statut"": ""Succès"", ""message"": ""Suppression effectuée avec succès.""}"
+      	a_SocketRecu.m_CodeReponse   = "200 OK"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = "{""statut"": ""Succès"", ""message"": ""Suppression effectuée avec succès.""}"
       FIN
       
-      // 4. Libération mémoire obligatoire (Anti Race-Condition)
       libérer l_EnregistrementCourant
      type : 458752
    -
@@ -417,75 +534,113 @@ class :
      code : |1-
       procédure arret()
       
-      m_ServeurSocket.arret()
-      // ==============================================================================
-      // Méthode : _TraiterRequeteApi
-      // Rôle    : Routage RESTful standardisé (Unitaire / Collection / Batch)
-      // Version : WinDev 25 (Strict)
-      // ==============================================================================
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur("Arrêt ordonné du serveur d'application RaaD.", "", "INFO")
+      FIN
+      
+      SI m_Cache <> Null ALORS
+      	m_Cache.Arreter()
+      	m_Cache = Null
+      FIN
+      
+      SI m_GestionnaireExterne <> Null ALORS
+      	m_GestionnaireExterne = Null
+      FIN
+      
+      SI m_PontHttp3 <> Null ALORS
+      	m_PontHttp3.Arreter()
+      	m_PontHttp3 = Null
+      FIN
+      
+      SI m_ServeurSocket <> Null ALORS
+      	m_ServeurSocket.arret()
+      FIN
+      
+      SI m_Journal <> Null ALORS
+      	m_Journal.Arreter()
+      FIN
      type : 458752
    -
      name : _TraiterRequeteApi
      procedure_id : 1913498683031387734
      type_code : 12
      code : |1-
-      PROCÉDURE PRIVÉE _TraiterRequeteApi(a_SocketRecu est un CLCanalSocket)
-      // =================================================================================
-      // 1. EXTRACTION ET INJECTION DIRECTE (Zéro variable locale allouée)
-      // Segments d'URL : 2:"api", 3:"v1", 4:"data", 5:{espace}, 6:{table}, 7:{valkey}
-      // =================================================================================
+      PROCÉDURE PRIVÉE _TraiterRequeteApi(a_SocketRecu est CLCanalSocket)
       
-      l_CheminPur       est une chaîne
+      LOCAL
+      	l_CheminPur       est une chaîne
+      	l_IgnorerCache    est un booléen = Faux
+      	l_NomEspace       est une chaîne
+      	l_NomTable        est une chaîne
       
       SI Position(a_SocketRecu.m_UrlRecue, "?") > 0 ALORS
-      	// Le '?' existe : on extrait strictement ce qui se trouve à sa gauche
       	l_CheminPur = Gauche(a_SocketRecu.m_UrlRecue, Position(a_SocketRecu.m_UrlRecue, "?") - 1)
       SINON
-      	// Pas de paramètres : le chemin pur est l'URL complète
       	l_CheminPur = a_SocketRecu.m_UrlRecue
       FIN
       
+      a_SocketRecu.m_Parametres["table"]  = ExtraitChaîne(l_CheminPur, 4, "/")
+      a_SocketRecu.m_Parametres["valkey"] = ExtraitChaîne(l_CheminPur, 5, "/")
       
-      a_SocketRecu.m_Parametres["table"]		= ExtraitChaîne(l_CheminPur, 4, "/")
-      a_SocketRecu.m_Parametres["valkey"]		= ExtraitChaîne(l_CheminPur, 5, "/")
+      l_NomTable  = a_SocketRecu.m_Parametres["table"]
+      l_NomEspace = (a_SocketRecu.m_Parametres["espace"] <> "" ? a_SocketRecu.m_Parametres["espace"] SINON m_Base.m_connexion..BaseDeDonnées)
       
-      // =================================================================================
-      // 2. CONTRÔLEUR REST (Évaluation directe de l'objet)
-      // =================================================================================
+      // Détection du contournement explicite du cache en RAM
+      SI a_SocketRecu.m_Parametres["nocache"] = "1" OU ...
+         Minuscule(a_SocketRecu.m_Parametres["nocache"]) = "true" OU ...
+         a_SocketRecu.m_Parametres["cache"] = "0" OU ...
+         Minuscule(a_SocketRecu.m_Parametres["cache"]) = "false" OU ...
+         a_SocketRecu.m_Parametres["bypass"] = "1" OU ...
+         Position(Minuscule(a_SocketRecu.m_Parametres["cache-control"]), "no-cache") > 0 OU ...
+         Position(Minuscule(a_SocketRecu.m_Parametres["pragma"]), "no-cache") > 0 ALORS
+      	l_IgnorerCache = Vrai
+      FIN
       
       QUAND EXCEPTION DANS
       	
-      	
       	SELON a_SocketRecu.m_TypeRequete
       		CAS "GET" :
-      			// On lit directement le paramètre fraîchement assigné
-      			SI a_SocketRecu.m_Parametres["valkey"] = "" Ou  a_SocketRecu.m_Parametres["valkey"] = eot ALORS
-      				_LireEnregistrements(a_SocketRecu)
+      			SI a_SocketRecu.m_Parametres["valkey"] = "" OU a_SocketRecu.m_Parametres["valkey"] = eot ALORS
+      				_LireEnregistrements(a_SocketRecu, l_IgnorerCache)
       			SINON
-      				_LireEnregistrement(a_SocketRecu)
+      				_LireEnregistrement(a_SocketRecu, l_IgnorerCache)
       			FIN
       			
       		CAS "POST" :
       			_CreerEnregistrement(a_SocketRecu)
+      			SI (a_SocketRecu.m_CodeReponse = "200 OK" OU a_SocketRecu.m_CodeReponse = "201 Created") ET m_Cache <> Null ALORS
+      				m_Cache.InvaliderRessource(l_NomEspace, l_NomTable)
+      			FIN
       			
       		CAS "PUT" :
       			_ModifierEnregistrement(a_SocketRecu)
+      			SI a_SocketRecu.m_CodeReponse = "200 OK" ET m_Cache <> Null ALORS
+      				m_Cache.InvaliderRessource(l_NomEspace, l_NomTable)
+      			FIN
       			
       		CAS "DELETE" :
       			_SupprimerEnregistrement(a_SocketRecu)
+      			SI a_SocketRecu.m_CodeReponse = "200 OK" ET m_Cache <> Null ALORS
+      				m_Cache.InvaliderRessource(l_NomEspace, l_NomTable)
+      			FIN
       			
       		AUTRE CAS :
-      			// Protection standardisée si le verbe HTTP n'est pas supporté
-      			a_SocketRecu.m_CodeReponse = "405 Method Not Allowed"
+      			a_SocketRecu.m_CodeReponse   = "405 Method Not Allowed"
+      			a_SocketRecu.m_extension     = ".json"
+      			a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Méthode HTTP non autorisée.""}"
+      			SI m_Journal <> Null ALORS
+      				m_Journal.EnregistrerErreur(ChaîneConstruit("Verbe HTTP non pris en charge : '%1' sur l'URI '%2'", a_SocketRecu.m_TypeRequete, a_SocketRecu.m_UrlRecue), a_SocketRecu.m_NomHote, "AVERTISSEMENT")
+      			FIN
       	FIN
       	
       FAIRE
-      	// Capture silencieuse de l'exception, journalisation et retour propre 500 au client
-      	// Remplace CLLog par ta classe de journalisation si nécessaire
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Exception non interceptée lors du routage REST de l'URI '%1'", a_SocketRecu.m_UrlRecue), a_SocketRecu.m_NomHote, "CRITIQUE", ExceptionInfo(errComplet))
+      	FIN
       	
-      	
-      	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
-      	a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Une erreur interne est survenue lors du routage de la requête.""}"
+      	a_SocketRecu.m_CodeReponse   = "500 Internal Server Error"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Une erreur interne est survenue lors du routage de la requête.""}"
       FIN
      type : 458752
    -
@@ -493,36 +648,35 @@ class :
      procedure_id : 1911473459928725536
      type_code : 12
      code : |1+
-      
       PROCÉDURE PRIVÉE _TraiterRequeteMonitoring(a_SocketRecu est CLCanalSocket)
       
       QUAND EXCEPTION DANS
-      	a_SocketRecu:m_CodeReponse		= "200 OK"
-      	a_SocketRecu:m_ContenuBuffer	= m_MonitoringServeur:ObtenirJsonMetriques()
-      	a_SocketRecu:m_Extension		= ".json"
+      	a_SocketRecu.m_CodeReponse   = "200 OK"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = m_MonitoringServeur.ObtenirJsonMetriques()
       FAIRE
-      	a_SocketRecu:m_CodeReponse		= "500 Internal Server Error"
-      	a_SocketRecu:m_ContenuBuffer	= "{""erreur"": ""Impossible de générer la télémétrie système.""}"
-      	a_SocketRecu:m_Extension		= ".json"
+      	a_SocketRecu.m_CodeReponse   = "500 Internal Server Error"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Impossible de générer la télémétrie système.""}"
+      	
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur("Échec de génération du flux JSON de télémétrie système.", a_SocketRecu.m_NomHote, "ERREUR", ExceptionInfo(errComplet))
+      	FIN
       FIN
-      
      type : 458752
    -
      name : _TraiterRequeteAcmeChallenge
      procedure_id : 1911593173555071509
      type_code : 12
      code : |1+
-      /// Répond instantanément en mémoire vive aux requêtes HTTP de validation Let's Encrypt.
       PROCÉDURE PRIVÉE _TraiterRequeteAcmeChallenge(a_SocketRecu est CLCanalSocket)
       
       LOCAL
-      	l_JetonACME		est une chaîne
-      	l_ReponseCle	est une chaîne
+      	l_JetonACME  est une chaîne
+      	l_ReponseCle est une chaîne
       	
-      // Extraction du token situé après "/.well-known/acme-challenge/"
       l_JetonACME = a_SocketRecu.m_UrlRecue[[Position(a_SocketRecu.m_UrlRecue, "acme-challenge/", 1, SansCasse) + 15 À]]
       
-      // Nettoyage des éventuels paramètres de requête (query string)
       SI Position(l_JetonACME, "?") > 0 ALORS
       	l_JetonACME = Gauche(l_JetonACME, Position(l_JetonACME, "?") - 1)
       FIN
@@ -530,75 +684,78 @@ class :
       l_ReponseCle = m_GestionnaireSSL.ObtenirReponseChallenge(l_JetonACME)
       
       SI l_ReponseCle <> "" ALORS
-      	a_SocketRecu.m_CodeReponse		= "200 OK"
-      	a_SocketRecu.m_ContenuBuffer	= l_ReponseCle
-      	a_SocketRecu.m_Extension		= ".txt"
+      	a_SocketRecu.m_CodeReponse   = "200 OK"
+      	a_SocketRecu.m_extension     = ".txt"
+      	a_SocketRecu.m_ContenuBuffer = l_ReponseCle
       SINON
-      	a_SocketRecu.m_CodeReponse		= "404 Not Found"
-      	a_SocketRecu.m_ContenuBuffer	= "Challenge introuvable."
-      	a_SocketRecu.m_Extension		= ".txt"
+      	a_SocketRecu.m_CodeReponse   = "404 Not Found"
+      	a_SocketRecu.m_extension     = ".txt"
+      	a_SocketRecu.m_ContenuBuffer = "Challenge introuvable."
       FIN
-      
      type : 458752
    -
      name : _TraiterAuthentificationLogin
      procedure_id : 1917956996525251992
      type_code : 12
      code : |1+
-      /// <summary>
-      /// Route POST /api/auth/login : authentifie et génère la réponse selon le standard natif RaaD.
-      /// </summary>
-      PROCÉDURE PRIVÉE _TraiterAuthentificationLogin(a_SocketRecu est un CLCanalSocket)
+      PROCÉDURE PRIVÉE _TraiterAuthentificationLogin(a_SocketRecu est CLCanalSocket)
       
       LOCAL
-      	l_JsonEntrant	est un Variant
-      	l_Identifiant	est une chaîne	= ""
-      	l_MotDePasse	est une chaîne	= ""
-      	l_JetonAcces	est une chaîne	= ""
-      	l_ReponseJson	est un Variant
+      	l_JsonEntrant est un Variant
+      	l_Identifiant est une chaîne = ""
+      	l_MotDePasse  est une chaîne = ""
+      	l_JetonAcces  est une chaîne = ""
+      	l_ReponseJson est un Variant
       	
-      // 1. Contrôle du verbe HTTP
       SI a_SocketRecu.m_TypeRequete <> "POST" ALORS
-      	a_SocketRecu.m_CodeReponse		= "405 Method Not Allowed"
-      	a_SocketRecu.m_Extension		= "json"
-      	a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Méthode POST obligatoire.""}"
+      	a_SocketRecu.m_CodeReponse   = "405 Method Not Allowed"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Méthode POST obligatoire.""}"
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Appel login refusé : Verbe '%1' non autorisé.", a_SocketRecu.m_TypeRequete), a_SocketRecu.m_NomHote, "AVERTISSEMENT")
+      	FIN
       	RETOUR
       FIN
       
-      // 2. Parsing du corps JSON
       QUAND EXCEPTION DANS
-      	l_JsonEntrant	= JSONVersVariant(a_SocketRecu.m_CorpsRequete)
-      	l_Identifiant	= SansEspace(l_JsonEntrant.identifiant)
-      	l_MotDePasse	= l_JsonEntrant.mot_de_passe
+      	l_JsonEntrant = JSONVersVariant(a_SocketRecu.m_CorpsRequete)
+      	l_Identifiant = SansEspace(l_JsonEntrant.identifiant)
+      	l_MotDePasse  = l_JsonEntrant.mot_de_passe
       FAIRE
-      	a_SocketRecu.m_CodeReponse		= "400 Bad Request"
-      	a_SocketRecu.m_Extension		= "json"
-      	a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Corps JSON invalide.""}"
+      	a_SocketRecu.m_CodeReponse   = "400 Bad Request"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Corps JSON invalide.""}"
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur("Corps JSON malformé lors de l'authentification.", a_SocketRecu.m_NomHote, "AVERTISSEMENT", ExceptionInfo(errComplet))
+      	FIN
       	RETOUR
       FIN
       
-      // 3. Vérification des identifiants en base
       SI PAS m_Securite.VerifierIdentifiants(l_Identifiant, l_MotDePasse) ALORS
-      	a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
-      	a_SocketRecu.m_Extension		= "json"
-      	a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Identifiants invalides.""}"
+      	a_SocketRecu.m_CodeReponse   = "401 Unauthorized"
+      	a_SocketRecu.m_extension     = ".json"
+      	a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Identifiants invalides.""}"
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Échec d'authentification pour le compte '%1' depuis l'IP %2.", l_Identifiant, a_SocketRecu.m_AdresseIp), a_SocketRecu.m_NomHote, "SECURITE")
+      	FIN
       	RETOUR
       FIN
       
-      // 4. Émission du jeton (valide 120 minutes)
-      l_JetonAcces					= m_Securite.GenererJeton(l_Identifiant, 120)
+      l_JetonAcces = m_Securite.GenererJeton(l_Identifiant, 120)
       
-      // 5. Génération de la réponse via les propriétés natives du canal socket
-      l_ReponseJson.statut			= "succes"
-      l_ReponseJson.token_type		= "Bearer"
-      l_ReponseJson.access_token		= l_JetonAcces
-      l_ReponseJson.expires_in		= 7200
-      l_ReponseJson.utilisateur		= l_Identifiant
+      l_ReponseJson.statut       = "succes"
+      l_ReponseJson.token_type   = "Bearer"
+      l_ReponseJson.access_token = l_JetonAcces
+      l_ReponseJson.expires_in   = 7200
+      l_ReponseJson.utilisateur  = l_Identifiant
       
-      a_SocketRecu.m_CodeReponse		= "200 OK"
-      a_SocketRecu.m_Extension		= "json"
-      a_SocketRecu.m_ContenuBuffer	= VariantVersJSON(l_ReponseJson)
+      a_SocketRecu.m_CodeReponse   = "200 OK"
+      a_SocketRecu.m_extension     = ".json"
+      a_SocketRecu.m_ContenuBuffer = VariantVersJSON(l_ReponseJson)
       
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Authentification réussie pour l'utilisateur '%1'.", l_Identifiant), a_SocketRecu.m_NomHote, "INFO")
+      FIN
      type : 458752
   procedure_templates : []
   property_templates : []

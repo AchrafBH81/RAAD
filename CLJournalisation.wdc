@@ -14,10 +14,42 @@ class :
   type_code : 10
   p_codes :
    -
-     code : |1+
-      CLJournalisation est une Classe
+     code : |1-
+      // ==============================================================================
+      // Classe   : CLJournalisation
+      // Rôle     : Moteur de journalisation asynchrone haute performance type Apache
+      // Version  : WinDev 25 Strict
+      // ==============================================================================
       
-      fin
+      // Structure atomique représentant un événement de journalisation en mémoire RAM
+      STEvenementJournal est une Structure
+      	m_TypeJournal		est une chaîne		// "ACCES" ou "ERREUR"
+      	m_NomVHost			est une chaîne		// Nom de domaine ou vide (Système)
+      	m_LigneJournal		est une chaîne		// Ligne brute formatée
+      	m_DateHeureCreation	est une DateHeure	// Horodatage précis
+      FIN
+      
+      CLJournalisation est une Classe
+      	
+      PRIVÉ
+      	// --- Synchronisation Multithread ---
+      	m_NomSectionCritique			est une chaîne
+      	m_FileAttenteEvenements			est un tableau de STEvenementJournal
+      	m_ThreadWorkerActif				est un booléen
+      	m_NomThreadWorker				est une chaîne
+      	m_IntervalleSommeilMs			est un entier
+      	
+      	// --- Paramètres de Configuration ---
+      	m_ActiverJournalAcces			est un booléen
+      	m_ConservationLogsJours			est un entier
+      	m_RepertoireRacine				est une chaîne
+      	m_RepertoireSystemeLogs			est une chaîne
+      	m_RepertoireProjets				est une chaîne
+      	
+      	// --- Maintenance et Rétention ---
+      	m_DerniereDatePurge				est une Date
+      	
+      FIN
      type : 131072
   procedures :
    -
@@ -25,7 +57,34 @@ class :
      procedure_id : 1891381628690435983
      type_code : 27
      code : |1+
-      procédure Constructeur()
+      /// <summary>
+      /// Constructeur de la classe de journalisation asynchrone.
+      /// </summary>
+      /// <param name="a_RepertoireRacine">Chemin racine du serveur RaaD (ex: fRepExe()).</param>
+      /// <param name="a_ActiverJournalAcces">Active ou désactive l'écriture du journal des accès HTTP.</param>
+      /// <param name="a_ConservationLogsJours">Nombre de jours avant purge automatique des logs.</param>
+      PROCÉDURE Constructeur(a_RepertoireRacine est une chaîne = "", a_ActiverJournalAcces est un booléen = Vrai, a_ConservationLogsJours est un entier = 30)
+      
+      // 1. Initialisation des identifiants de concurrence
+      m_NomSectionCritique		= "SECTION_CRITIQUE_RAAD_JOURNALISATION"
+      m_NomThreadWorker			= "THREAD_WORKER_JOURNALISATION_RAAD"
+      m_IntervalleSommeilMs		= 250 // Cycle de flush disque toutes les 250 ms
+      m_ThreadWorkerActif			= Faux
+      
+      // 2. Paramétrage fonctionnel
+      m_ActiverJournalAcces		= a_ActiverJournalAcces
+      m_ConservationLogsJours		= (a_ConservationLogsJours > 0 ? a_ConservationLogsJours SINON 30)
+      
+      // 3. Normalisation des répertoires d'écriture
+      SI a_RepertoireRacine = "" ALORS
+      	m_RepertoireRacine		= ComplèteRep(fRepExe())
+      SINON
+      	m_RepertoireRacine		= ComplèteRep(a_RepertoireRacine)
+      FIN
+      
+      m_RepertoireSystemeLogs		= m_RepertoireRacine + "Systeme\logs\"
+      m_RepertoireProjets			= m_RepertoireRacine + "Projects\"
+      m_DerniereDatePurge			= "19000101"
       
      type : 589824
    -
@@ -33,16 +92,372 @@ class :
      procedure_id : 1891381628690501519
      type_code : 28
      code : |1+
-      procédure Destructeur()
+      /// <summary>
+      /// Destructeur : garantit l'arrêt du thread worker et le vidage des tampons.
+      /// </summary>
+      PROCÉDURE Destructeur()
       
+      // Arrêt contrôlé du worker de fond
+      Arreter()
+      
+      // Libération explicite de la mémoire de la file
+      SectionCritiqueDébut(m_NomSectionCritique)
+      TableauSupprimeTout(m_FileAttenteEvenements)
+      SectionCritiqueFin(m_NomSectionCritique)
      type : 655360
    -
-     name : LogErreur
-     procedure_id : 1891381628690567055
+     name : Demarrer
+     procedure_id : 1919746464581096568
      type_code : 12
      code : |1+
+      /// <summary>
+      /// Démarre le moteur de log asynchrone et lance le thread d'écriture disque.
+      /// </summary>
+      /// <returns>Vrai si le thread a démarré avec succès, Faux sinon.</returns>
+      PROCÉDURE Demarrer() : booléen
       
-      procédure LogErreur(local a_message est une chaîne)
+      // 1. Création préventive du dossier système si inexistant
+      SI PAS fRepExiste(m_RepertoireSystemeLogs) ALORS
+      	fRepCrée(m_RepertoireSystemeLogs)
+      FIN
+      
+      // 2. Démarrage du thread consommateur de fond
+      m_ThreadWorkerActif = Vrai
+      
+      QUAND EXCEPTION DANS
+      	ThreadExécute(m_NomThreadWorker, threadNormal, _TraiterEcrituresDisqueEnFond)
+      FAIRE
+      	m_ThreadWorkerActif = Faux
+      	RENVOYER Faux
+      FIN
+      
+      // Enregistrement du premier événement système
+      EnregistrerErreur("Démarrage du sous-système de journalisation asynchrone RaaD.", "", "INFO")
+      
+      RENVOYER Vrai
+     type : 458752
+   -
+     name : Arreter
+     procedure_id : 1919746477466066867
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Notifie le worker de s'arrêter et force l'écriture immédiate des derniers logs en RAM.
+      /// </summary>
+      PROCÉDURE Arreter()
+      
+      LOCAL
+      	l_TamponResiduel est un tableau de STEvenementJournal
+      	
+      SI PAS m_ThreadWorkerActif ALORS
+      	RETOUR
+      FIN
+      
+      // 1. Signalisation de l'arrêt au thread
+      m_ThreadWorkerActif = Faux
+      
+      // 2. Attente de la clôture du thread (délai de sécurité max : 1500 ms)
+      ThreadAttend(m_NomThreadWorker, 150)
+      
+      // 3. Vidage ultime du solde de la file d'attente (Flush final synchrone)
+      SectionCritiqueDébut(m_NomSectionCritique)
+      TableauCopie(m_FileAttenteEvenements, l_TamponResiduel)
+      TableauSupprimeTout(m_FileAttenteEvenements)
+      SectionCritiqueFin(m_NomSectionCritique)
+      
+      SI TableauOccurrence(l_TamponResiduel) > 0 ALORS
+      	_FlusherTamponSurDisque(l_TamponResiduel)
+      FIN
+      
+     type : 458752
+   -
+     name : EnregistrerAcces
+     procedure_id : 1919746490351037197
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Empile une requête HTTP résolue dans la file asynchrone.
+      /// </summary>
+      PROCÉDURE EnregistrerAcces(a_AdresseIp est une chaîne, a_VerbeHttp est une chaîne, a_UriRequete est une chaîne, a_CodeHttp est un entier, a_TailleOctets est un entier sur 8 octets, a_LatenceMs est un réel, a_UserAgent est une chaîne = "-", a_NomVHost est une chaîne = "")
+      
+      // Court-circuit immédiat sans verrou si le journal des accès est inactif
+      SI PAS m_ActiverJournalAcces ALORS
+      	RETOUR
+      FIN
+      
+      LOCAL
+      	l_DateHeureCourante	est une DateHeure	= DateHeureSys()
+      	l_HorodatageTexte	est une chaîne
+      	l_LigneFormattee	est une chaîne
+      	l_Evenement			est une STEvenementJournal
+      	
+      // Formatage horodaté [AAAA-MM-JJ HH:MM:SS.CCC]
+      l_HorodatageTexte = ChaîneConstruit("[%1-%2-%3 %4:%5:%6.%7]", ...
+      l_DateHeureCourante..PartieDate[[1 À 4]], ...
+      l_DateHeureCourante..PartieDate[[5 À 6]], ...
+      l_DateHeureCourante..PartieDate[[7 À 8]], ...
+      l_DateHeureCourante..PartieHeure[[1 À 2]], ...
+      l_DateHeureCourante..PartieHeure[[3 À 4]], ...
+      l_DateHeureCourante..PartieHeure[[5 À 6]], ...
+      l_DateHeureCourante..PartieHeure[[7 À 9]])
+      
+      // Modèle de log : IP - [Date] "VERB URI HTTP/1.1" Code Taille LatenceMs "User-Agent"
+      l_LigneFormattee = ChaîneConstruit("%1 - %2 ""%3 %4 HTTP/1.1"" %5 %6 %7ms ""%8""", ...
+      (a_AdresseIp <> "" ? a_AdresseIp SINON "127.0.0.1"), ...
+      l_HorodatageTexte, ...
+      Majuscule(SansEspace(a_VerbeHttp)), ...
+      SansEspace(a_UriRequete), ...
+      a_CodeHttp, ...
+      a_TailleOctets, ...
+      NumériqueVersChaîne(a_LatenceMs, "10.2f"), ...
+      (a_UserAgent <> "" ? a_UserAgent SINON "-"))
+      
+      // Remplissage de la structure atomique
+      l_Evenement.m_TypeJournal		= "ACCES"
+      l_Evenement.m_NomVHost			= SansEspace(a_NomVHost)
+      l_Evenement.m_LigneJournal		= l_LigneFormattee
+      l_Evenement.m_DateHeureCreation	= l_DateHeureCourante
+      
+      // Empilement ultra-rapide en mémoire vive sous verrou strict
+      SectionCritiqueDébut(m_NomSectionCritique)
+      TableauAjoute(m_FileAttenteEvenements, l_Evenement)
+      SectionCritiqueFin(m_NomSectionCritique)
+      
+     type : 458752
+   -
+     name : EnregistrerErreur
+     procedure_id : 1919746498941039794
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Empile une erreur ou une anomalie serveur dans la file asynchrone.
+      /// </summary>
+      PROCÉDURE EnregistrerErreur(a_MessageErreur est une chaîne, a_NomVHost est une chaîne = "", a_NiveauGravite est une chaîne = "ERREUR", a_ContexteException est une chaîne = "")
+      
+      LOCAL
+      	l_DateHeureCourante	est une DateHeure	= DateHeureSys()
+      	l_HorodatageTexte	est une chaîne
+      	l_LigneFormattee	est une chaîne
+      	l_Evenement			est une STEvenementJournal
+      	
+      // Formatage horodaté [AAAA-MM-JJ HH:MM:SS.CCC]
+      l_HorodatageTexte = ChaîneConstruit("[%1-%2-%3 %4:%5:%6.%7]", ...
+      l_DateHeureCourante..PartieDate[[1 À 4]], ...
+      l_DateHeureCourante..PartieDate[[5 À 6]], ...
+      l_DateHeureCourante..PartieDate[[7 À 8]], ...
+      l_DateHeureCourante..PartieHeure[[1 À 2]], ...
+      l_DateHeureCourante..PartieHeure[[3 À 4]], ...
+      l_DateHeureCourante..PartieHeure[[5 À 6]], ...
+      l_DateHeureCourante..PartieHeure[[7 À 9]])
+      
+      // Modèle de log : [Date] [NIVEAU] Message [Détail Exception]
+      l_LigneFormattee = ChaîneConstruit("%1 [%2] %3", ...
+      l_HorodatageTexte, ...
+      Majuscule(SansEspace(a_NiveauGravite)), ...
+      a_MessageErreur)
+      
+      SI a_ContexteException <> "" ALORS
+      	l_LigneFormattee += " | Contexte : " + a_ContexteException
+      FIN
+      
+      l_Evenement.m_TypeJournal		= "ERREUR"
+      l_Evenement.m_NomVHost			= SansEspace(a_NomVHost)
+      l_Evenement.m_LigneJournal		= l_LigneFormattee
+      l_Evenement.m_DateHeureCreation	= l_DateHeureCourante
+      
+      SectionCritiqueDébut(m_NomSectionCritique)
+      TableauAjoute(m_FileAttenteEvenements, l_Evenement)
+      SectionCritiqueFin(m_NomSectionCritique)
+      
+     type : 458752
+   -
+     name : _TraiterEcrituresDisqueEnFond
+     procedure_id : 1919746876898249795
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Boucle de traitement du thread worker consommant les événements en tâche de fond.
+      /// </summary>
+      PROCÉDURE PRIVÉE _TraiterEcrituresDisqueEnFond()
+      
+      LOCAL
+      	l_TamponATraiter est un tableau de STEvenementJournal
+      	
+      TANTQUE m_ThreadWorkerActif
+      	
+      	// Sommeil non-bloquant pour regrouper les événements
+      	ThreadPause(m_IntervalleSommeilMs)
+      	
+      	// Déplacement atomique : copie de la file RAM vers un tampon local et vidage
+      	SectionCritiqueDébut(m_NomSectionCritique)
+      	SI TableauOccurrence(m_FileAttenteEvenements) > 0 ALORS
+      		TableauCopie(m_FileAttenteEvenements, l_TamponATraiter)
+      		TableauSupprimeTout(m_FileAttenteEvenements)
+      	FIN
+      	SectionCritiqueFin(m_NomSectionCritique)
+      	
+      	// Traitement des écritures physiques si des événements étaient présents
+      	SI TableauOccurrence(l_TamponATraiter) > 0 ALORS
+      		_FlusherTamponSurDisque(l_TamponATraiter)
+      		TableauSupprimeTout(l_TamponATraiter)
+      	FIN
+      	
+      	// Vérification quotidienne de la politique de rétention
+      	_PurgerLogsSiRequis()
+      	
+      FIN
+      
+     type : 458752
+   -
+     name : _FlusherTamponSurDisque
+     procedure_id : 1919746902668124451
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Regroupe les lignes par fichier de destination et exécute les écritures physiques par lot.
+      /// </summary>
+      PROCÉDURE PRIVÉE _FlusherTamponSurDisque(a_EvenementsASauvegarder est un tableau de STEvenementJournal)
+      
+      LOCAL
+      	l_Index					est un entier
+      	l_Total					est un entier	= TableauOccurrence(a_EvenementsASauvegarder)
+      	l_EvenementCourant		est une STEvenementJournal
+      	l_DossierCible			est une chaîne
+      	l_NomFichier			est une chaîne
+      	l_CheminComplet			est une chaîne
+      	l_PrefixeFichier		est une chaîne
+      	l_SuffixeDate			est une chaîne
+      	l_LignesParFichier		est un tableau associatif de chaînes
+      	l_BlocTexte				est une chaîne
+      	l_CheminFichierUnique	est une chaîne
+      	
+      // 1. Regroupement en RAM de tous les événements par chemin absolu
+      POUR l_Index = 1 À l_Total
+      	l_EvenementCourant = a_EvenementsASauvegarder[l_Index]
+      	
+      	// Résolution du cloisonnement Multi-Tenant
+      	SI l_EvenementCourant.m_NomVHost = "" ALORS
+      		l_DossierCible = m_RepertoireSystemeLogs
+      	SINON
+      		l_DossierCible = m_RepertoireProjets + l_EvenementCourant.m_NomVHost + "\logs\"
+      	FIN
+      	
+      	// Préfixe de fichier selon la typologie
+      	SI l_EvenementCourant.m_TypeJournal = "ACCES" ALORS
+      		l_PrefixeFichier = "acces_"
+      	SINON
+      		l_PrefixeFichier = "erreur_"
+      	FIN
+      	
+      	// Date de l'événement au format AAAAMMJJ
+      	l_SuffixeDate	= DateVersChaîne(l_EvenementCourant.m_DateHeureCreation..PartieDate, "AAAAMMJJ")
+      	l_NomFichier	= l_PrefixeFichier + l_SuffixeDate + ".log"
+      	l_CheminComplet	= l_DossierCible + l_NomFichier
+      	
+      	// Concaténation dans le buffer du fichier cible
+      	l_LignesParFichier[l_CheminComplet] += l_EvenementCourant.m_LigneJournal + RC
+      FIN
+      
+      // 2. Écritures physiques par lot (Batch Write)
+      POUR CHAQUE l_BlocTexte, l_CheminFichierUnique DE l_LignesParFichier
+      	QUAND EXCEPTION DANS
+      		// Création à la volée du dossier cible si nouveau VHost
+      		l_DossierCible = fExtraitChemin(l_CheminFichierUnique, fRépertoire)
+      		SI PAS fRepExiste(l_DossierCible) ALORS
+      			fRepCrée(l_DossierCible)
+      		FIN
+      		
+      		// Écriture directe native sans verrous bloquants
+      		fAjouteTexte(l_CheminFichierUnique, l_BlocTexte)
+      	FAIRE
+      		// Échec silencieux pour ne jamais crasher le thread de logs
+      	FIN
+      FIN
+      
+     type : 458752
+   -
+     name : _PurgerLogsSiRequis
+     procedure_id : 1919746911258126829
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Déclenche la rotation et purge automatique des fichiers journaux une fois par jour.
+      /// </summary>
+      PROCÉDURE PRIVÉE _PurgerLogsSiRequis()
+      
+      LOCAL
+      	l_DateDuJour			est une Date	= DateSys()
+      	l_ListeDossiersVHost	est une chaîne
+      	l_DossierVHost			est une chaîne
+      	
+      // Exécution conditionnée : uniquement si le jour a changé
+      SI l_DateDuJour = m_DerniereDatePurge ALORS
+      	RETOUR
+      FIN
+      
+      // 1. Purge du répertoire système
+      _PurgerDossierSpecifique(m_RepertoireSystemeLogs, m_ConservationLogsJours)
+      
+      // 2. Purge transversale des répertoires de chaque VHost
+      SI fRepExiste(m_RepertoireProjets) ALORS
+      	l_ListeDossiersVHost = fListeRépertoire(m_RepertoireProjets, frNonRécursif)
+      	
+      	POUR TOUTE CHAÎNE l_DossierVHost DE l_ListeDossiersVHost SÉPARÉE PAR RC
+      		SI l_DossierVHost <> "" ALORS
+      			_PurgerDossierSpecifique(ComplèteRep(l_DossierVHost) + "logs\", m_ConservationLogsJours)
+      		FIN
+      	FIN
+      FIN
+      
+      m_DerniereDatePurge = l_DateDuJour
+      
+     type : 458752
+   -
+     name : _PurgerDossierSpecifique
+     procedure_id : 1919747190431066147
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Supprime les fichiers .log d'un dossier donné dont l'âge dépasse le quota de rétention.
+      /// </summary>
+      PROCÉDURE PRIVÉE _PurgerDossierSpecifique(a_CheminDossier est une chaîne, a_JoursRetention est un entier)
+      
+      LOCAL
+      	l_DossierComplet	est une chaîne
+      	l_ListeFichiers		est une chaîne
+      	l_FichierCourant	est une chaîne
+      	l_DateFichier		est une Date
+      	l_DateAujourdhui	est une Date	= DateSys()
+      	l_AgeFichierJours	est un entier
+      	
+      l_DossierComplet = ComplèteRep(a_CheminDossier)
+      
+      SI PAS fRepExiste(l_DossierComplet) ALORS
+      	RETOUR
+      FIN
+      
+      // Récupération de tous les fichiers d'extension .log du dossier
+      l_ListeFichiers = fListeFichier(l_DossierComplet + "*.log", frNonRécursif)
+      
+      POUR TOUTE CHAÎNE l_FichierCourant DE l_ListeFichiers SÉPARÉE PAR RC
+      	SI l_FichierCourant = "" ALORS CONTINUER
+      	
+      	// Récupération de la date de modification (compatible WinDev 25)
+      	l_DateFichier = fDate(l_FichierCourant, "", fModification)
+      	
+      	SI l_DateFichier <> "" ALORS
+      		// Soustraction native de deux dates en WLangage = écart en nombre de jours
+      		l_AgeFichierJours = l_DateAujourdhui - l_DateFichier
+      		
+      		SI l_AgeFichierJours > a_JoursRetention ALORS
+      			QUAND EXCEPTION DANS
+      				fSupprime(l_FichierCourant)
+      			FAIRE
+      				// Échec silencieux si le fichier est actuellement verrouillé
+      			FIN
+      		FIN
+      	FIN
+      FIN
       
      type : 458752
   procedure_templates : []

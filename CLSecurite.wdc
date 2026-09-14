@@ -18,7 +18,6 @@ class :
       CLSecurite est une Classe
       	
       PUBLIC
-      PUBLIC
       	// Dépendances injectées
       	m_Configuration			est un CLConfiguration dynamique
       	m_Base					est un CLBase dynamique
@@ -78,7 +77,6 @@ class :
      procedure_id : 1917953315737684433
      type_code : 12
      code : |1+
-      
       /// Hache le mot de passe en appliquant le sel et l'algorithme paramétré dans config.conf.
       
       PROCÉDURE HacherMotDePasse(a_MotDePasseEnClair est une chaîne) : chaîne
@@ -131,7 +129,6 @@ class :
       
       // 3. Décodage standard (le buffer décodé est implicitement converti en chaîne)
       RENVOYER Décode(l_ChaineBase64, encodeBASE64)
-      
      type : 458752
    -
      name : VerifierIdentifiants
@@ -156,11 +153,11 @@ class :
       	l_MotDePasseStocke		est une chaîne	= ""
       	l_Authentifie			est un booléen	= Faux
       	
-      	// ------------------------------------------------------------------------------
-      	// 1. CONTRÔLE DU RÉFÉRENTIEL ORM (m_Base.m_Table)
+      // ------------------------------------------------------------------------------
+      // 1. CONTRÔLE DU RÉFÉRENTIEL ORM (m_Base.m_Table)
       // ------------------------------------------------------------------------------
       SI PAS m_Base.m_Table[m_NomTableUtilisateurs]..Existe ALORS
-      	_Journaliser(ChaîneConstruit("[SECURITE] Table '%1' introuvable dans le référentiel m_Base.m_Table.", m_NomTableUtilisateurs))
+      	_Journaliser(ChaîneConstruit("Table '%1' introuvable dans le référentiel m_Base.m_Table.", m_NomTableUtilisateurs), "CRITIQUE")
       	RENVOYER Faux
       FIN
       
@@ -210,7 +207,7 @@ class :
       		FIN
       	FIN
       FAIRE
-      	_Journaliser("[SECURITE] Exception lors du chargement de l'utilisateur : " + ExceptionInfo())
+      	_Journaliser(ChaîneConstruit("Exception lors du chargement de l'utilisateur '%1'.", a_Login), "CRITIQUE", ExceptionInfo(errComplet))
       	l_Authentifie = Faux
       FIN
       
@@ -218,6 +215,12 @@ class :
       // 6. LIBÉRATION MÉMOIRE OBLIGATOIRE DU CLONE ORM
       // ------------------------------------------------------------------------------
       libérer l_EnregistrementCourant
+      
+      SI PAS l_Authentifie ALORS
+      	_Journaliser(ChaîneConstruit("Tentative de connexion refusée : identifiants erronés pour le compte '%1'.", a_Login), "SECURITE")
+      SINON
+      	_Journaliser(ChaîneConstruit("Authentification validée avec succès pour le compte '%1'.", a_Login), "INFO")
+      FIN
       
       RENVOYER l_Authentifie
      type : 458752
@@ -269,13 +272,12 @@ class :
       l_SignatureBase64			= _EncoderBase64Url(l_SignatureBuffer)
       
       RENVOYER l_DonneesASigner + "." + l_SignatureBase64
-      
      type : 458752
    -
      name : ValiderJeton
      procedure_id : 1917953758119681158
      type_code : 12
-     code : |1+
+     code : |1-
       /// <summary>
       /// Contrôle mathématiquement l'intégrité et la validité temporelle du JWT en RAM.
       /// </summary>
@@ -291,8 +293,10 @@ class :
       	l_PayloadVariant		est un Variant
       	l_TimestampExp			est un entier
       	l_DateExpiration		est une DateHeure
+      	l_DateHeureFormattee	est une chaîne
       	
       SI l_Entete = EOT OU l_ChargeUtile = EOT OU l_SignatureRecue = EOT ALORS
+      	_Journaliser("Validation JWT refusée : Jeton malformé (segments manquants).", "SECURITE")
       	RENVOYER Faux
       FIN
       
@@ -302,6 +306,7 @@ class :
       l_SignatureBase64	= _EncoderBase64Url(l_SignatureCalculee)
       
       SI l_SignatureBase64 <> l_SignatureRecue ALORS
+      	_Journaliser("Validation JWT refusée : Signature HMAC invalide (altération de jeton ou clé secrète divergente).", "SECURITE")
       	RENVOYER Faux
       FIN
       
@@ -315,15 +320,17 @@ class :
       	SI l_TimestampExp > 0 ALORS
       		l_DateExpiration = EpochVersDateHeure(l_TimestampExp)
       		SI DateHeureSys() > l_DateExpiration ALORS
+      			// Formatage conforme WinDev 25 : DateVersChaîne + HeureVersChaîne
+      			l_DateHeureFormattee = DateVersChaîne(l_DateExpiration..PartieDate, "JJ/MM/AAAA") + " " + HeureVersChaîne(l_DateExpiration..PartieHeure, "HH:MM:SS")
+      			_Journaliser(ChaîneConstruit("Validation JWT refusée : Jeton expiré depuis le %1.", l_DateHeureFormattee), "SECURITE")
       			RENVOYER Faux
       		FIN
       	FIN
       FAIRE
+      	_Journaliser("Validation JWT refusée : Échec de désérialisation du payload JSON.", "SECURITE", ExceptionInfo(errComplet))
       	RENVOYER Faux
       FIN
-      
       RENVOYER Vrai
-      
      type : 458752
    -
      name : VerifierSecuriteRequete
@@ -357,22 +364,26 @@ class :
       	l_JetonRecu = a_SocketRecu.m_Parametres["token"]
       FIN
       
-      SI l_JetonRecu = "" ALORS RENVOYER Faux
+      SI l_JetonRecu = "" ALORS 
+      	_Journaliser(ChaîneConstruit("Accès non autorisé sur '%1' : Jeton absent.", l_UrlRequete), "SECURITE")
+      	RENVOYER Faux
+      FIN
       
       // 3. Mode Test / Développement (clé de contournement configurée)
       SI m_ModeTestActif = Vrai ALORS
       	SI m_CleTest <> "" ET l_JetonRecu = m_CleTest ALORS
+      		_Journaliser(ChaîneConstruit("Contournement de sécurité actif (Clé Test) pour l'accès à '%1'.", l_UrlRequete), "AVERTISSEMENT")
       		RENVOYER Vrai
       	FIN
       FIN
       
       // 4. Validation cryptographique en mémoire RAM (Zéro requête HFSQL)
       SI PAS ValiderJeton(l_JetonRecu, l_ChargeUtileJson) ALORS
+      	_Journaliser(ChaîneConstruit("Accès refusé sur '%1' : Jeton invalide ou altéré.", l_UrlRequete), "SECURITE")
       	RENVOYER Faux
       FIN
       
-      renvoyer Vrai
-      
+      RENVOYER Vrai
      type : 458752
    -
      name : _EncoderBase64Url
@@ -393,7 +404,7 @@ class :
       	l_TamponBuffer	est un buffer
       	l_ChaineBase64	est une chaîne
       	
-      	// 1. Affectation directe WLangage (transtypage automatique en buffer binaire)
+      // 1. Affectation directe WLangage (transtypage automatique en buffer binaire)
       // Fonctionne à 100% que a_Donnees soit une chaîne ANSI/UTF-8 ou un buffer binaire
       l_TamponBuffer	= a_Donnees
       
@@ -407,7 +418,6 @@ class :
       
       // 4. Renvoi de la chaîne sans espaces résiduels
       RENVOYER SansEspace(l_ChaineBase64)
-      
      type : 458752
    -
      name : _Journaliser
@@ -415,11 +425,13 @@ class :
      type_code : 12
      code : |1-
       /// <summary>
-      /// Méthode d'attente pour la gestion future des logs sans provoquer d'erreur de compilation.
+      /// Passerelle interne de journalisation de sécurité vers le moteur asynchrone RaaD.
       /// </summary>
-      PROCÉDURE PRIVÉE _Journaliser(a_Message est une chaîne)
+      PROCÉDURE PRIVÉE _Journaliser(a_Message est une chaîne, a_NiveauGravite est une chaîne = "SECURITE", a_ContexteException est une chaîne = "")
       
-      // Intentionnellement vide à ce stade du projet.
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(a_Message, "", a_NiveauGravite, a_ContexteException)
+      FIN
       
       // ==============================================================================
       // Méthode : InitialiserSocleSecurite
@@ -445,18 +457,18 @@ class :
       	l_DonneesAdmin			est un Variant
       	l_MotDePasseHache		est une chaîne
       	
-      	// ------------------------------------------------------------------------------
-      	// 1. CONTRÔLE DE L'EXISTENCE DANS LE RÉFÉRENTIEL ORM (m_Base.m_Table)
+      // ------------------------------------------------------------------------------
+      // 1. CONTRÔLE DE L'EXISTENCE DANS LE RÉFÉRENTIEL ORM (m_Base.m_Table)
       // ------------------------------------------------------------------------------
       SI PAS m_Base.m_Table[m_NomTableUtilisateurs]..Existe ALORS
-      	_Journaliser(ChaîneConstruit("[SECURITE] Table '%1' absente de m_Base.m_Table. Création physique SQL...", m_NomTableUtilisateurs))
+      	_Journaliser(ChaîneConstruit("Table '%1' absente de m_Base.m_Table. Création physique SQL...", m_NomTableUtilisateurs), "INFO")
       	
       	// Construction DDL dynamique selon les rubriques spécifiées dans config.conf
       	l_RequeteCreation = ChaîneConstruit("CREATE TABLE %1 (ID_%1 BIGINT NOT NULL PRIMARY KEY, %2 VARCHAR(150), %3 VARCHAR(255))", ...
       	m_NomTableUtilisateurs, m_RubriqueLogin, m_RubriqueMotDePasse)
       	
       	SI PAS HExécuteRequêteSQL(l_SourceCreation, m_Base.m_Connexion, hRequêteDéfaut, l_RequeteCreation) ALORS
-      		_Journaliser(ChaîneConstruit("[SECURITE] Échec de la création DDL de la table %1 : %2", m_NomTableUtilisateurs, HErreurInfo()))
+      		_Journaliser(ChaîneConstruit("Échec de la création DDL de la table %1 : %2", m_NomTableUtilisateurs, HErreurInfo(hErrComplet)), "CRITIQUE")
       		HAnnuleDéclaration(l_SourceCreation)
       		RENVOYER Faux
       	FIN
@@ -466,7 +478,7 @@ class :
       	l_PrototypeSecurite.Init(m_NomTableUtilisateurs)
       	m_Base.m_Table[m_NomTableUtilisateurs] = l_PrototypeSecurite
       	
-      	_Journaliser(ChaîneConstruit("[SECURITE] Table '%1' créée et enregistrée avec succès dans m_Base.m_Table.", m_NomTableUtilisateurs))
+      	_Journaliser(ChaîneConstruit("Table '%1' créée et enregistrée avec succès dans m_Base.m_Table.", m_NomTableUtilisateurs), "INFO")
       FIN
       
       // ------------------------------------------------------------------------------
@@ -474,7 +486,7 @@ class :
       // ------------------------------------------------------------------------------
       // Décompte instantané en O(1) via le moteur HFSQL
       SI HNbEnr(m_NomTableUtilisateurs) = 0 ALORS
-      	_Journaliser("[SECURITE] Table vierge. Création du compte par défaut (admin / admin) via l'ORM...")
+      	_Journaliser("Table d'utilisateurs vierge. Amorçage automatique du compte par défaut (admin) via l'ORM...", "INFO")
       	
       	// Instanciation dynamique isolée pour le thread courant (Anti Race-Condition)
       	l_EnregistrementCourant = allouer un CLEnregistrement()
@@ -499,19 +511,19 @@ class :
       	QUAND EXCEPTION DANS
       		l_EnregistrementCourant.Creer()
       	FAIRE
-      		_Journaliser("[SECURITE] Exception lors de l'exécution de Creer() : " + ExceptionInfo())
+      		_Journaliser("Exception lors de l'exécution de Creer() pour le compte administrateur initial.", "CRITIQUE", ExceptionInfo(errComplet))
       	FIN
       	
       	// Vérification de la persistance effective dans la table HFSQL
       	SI HNbEnr(m_NomTableUtilisateurs) = 0 ALORS
-      		_Journaliser("[SECURITE] Échec de l'insertion de l'administrateur par l'ORM.")
+      		_Journaliser("Échec de l'insertion de l'administrateur initial par l'ORM.", "CRITIQUE")
       		libérer l_EnregistrementCourant
       		RENVOYER Faux
       	FIN
       	
       	// Libération mémoire obligatoire
       	libérer l_EnregistrementCourant
-      	_Journaliser("[SECURITE] Compte administrateur initial généré avec succès par l'ORM.")
+      	_Journaliser("Compte administrateur initial généré avec succès par l'ORM.", "INFO")
       FIN
       
       RENVOYER Vrai

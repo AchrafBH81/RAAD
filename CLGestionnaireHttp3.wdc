@@ -65,7 +65,6 @@ class :
       m_PortHttp3				= Val(m_Configuration.LireParametreServeur("PortHttp3", "443"))
       m_PortLocalDestination	= Val(m_Configuration.LireParametreServeur("Port", "8080"))
       m_MotDePassePfx			= m_Configuration.LireParametreServeur("MotDePassePfx", "RaadQuicSecret2026")
-      
      type : 589824
    -
      name : Destructeur
@@ -103,7 +102,7 @@ class :
       QUAND EXCEPTION DANS
       	l_CodeRetour = AppelDLL32(m_CheminDllBridge, "ArreterPontHttp3")
       FAIRE
-      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Erreur lors de l'arrêt du service : %1", ExceptionInfo()))
+      	_JournaliserErreur("[HTTP/3] Erreur lors de l'arrêt du service pont HTTP/3.", "ERREUR", ExceptionInfo(errComplet))
       	m_EstActif = Faux
       	SectionCritiqueFin(m_NomSectionCritique)
       	RENVOYER Faux
@@ -114,17 +113,15 @@ class :
       
       SectionCritiqueFin(m_NomSectionCritique)
       RENVOYER (l_CodeRetour = 0 OU l_CodeRetour = 1)
-      
-      
-      /// <summary>
-      /// Indique si le pont réseau HTTP/3 est actuellement en écoute.
-      /// </summary>
      type : 458752
    -
      name : EstOperationnel
      procedure_id : 1919326373830302413
      type_code : 12
      code : |1+
+      /// <summary>
+      /// Indique si le pont réseau HTTP/3 est actuellement en écoute.
+      /// </summary>
       PROCÉDURE EstOperationnel() : booléen
       
       RENVOYER m_EstActif
@@ -160,7 +157,7 @@ class :
       
       // 2. Préparation du certificat PKCS#12 (.pfx) requis par Kestrel / HTTP/3
       SI PAS _PreparerCertificat() ALORS
-      	_JournaliserErreur("[HTTP/3] Échec de préparation du certificat TLS. Démarrage abandonné.")
+      	_JournaliserErreur("[HTTP/3] Échec de préparation du certificat TLS. Démarrage abandonné.", "CRITIQUE")
       	SectionCritiqueFin(m_NomSectionCritique)
       	RENVOYER Faux
       FIN
@@ -174,7 +171,7 @@ class :
       	m_PortHttp3, ...
       	m_PortLocalDestination)
       FAIRE
-      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Exception fatale lors de l'appel système DemarrerPontHttp3 : %1", ExceptionInfo()))
+      	_JournaliserErreur("[HTTP/3] Exception fatale lors de l'appel système DemarrerPontHttp3.", "CRITIQUE", ExceptionInfo(errComplet))
       	SectionCritiqueFin(m_NomSectionCritique)
       	RENVOYER Faux
       FIN
@@ -187,11 +184,10 @@ class :
       	RENVOYER Vrai
       SINON
       	m_EstActif = Faux
-      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Échec de l'initialisation du serveur Kestrel (Code d'erreur retourné : %1).", l_CodeRetour))
+      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Échec de l'initialisation du serveur Kestrel (Code d'erreur retourné : %1).", l_CodeRetour), "CRITIQUE")
       	SectionCritiqueFin(m_NomSectionCritique)
       	RENVOYER Faux
       FIN
-      
      type : 458752
    -
      name : _VerifierEnvironnement
@@ -205,24 +201,23 @@ class :
       
       // Contrôle de l'architecture 64 bits via la fonction native WinDev 25
       SI PAS EnMode64Bits() ALORS
-      	_JournaliserErreur("[HTTP/3] Erreur critique : Le processus RaaD s'exécute en 32 bits. La DLL Native AOT requiert un exécutable 64 bits.")
+      	_JournaliserErreur("[HTTP/3] Erreur critique : Le processus RaaD s'exécute en 32 bits. La DLL Native AOT requiert un exécutable 64 bits.", "CRITIQUE")
       	RENVOYER Faux
       FIN
       
       // Vérification de RaadHttp3Bridge.dll
       SI PAS fFichierExiste(m_CheminDllBridge) ALORS
-      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Binaire manquant : %1 introuvable dans le répertoire d'exécution.", m_CheminDllBridge))
+      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Binaire manquant : %1 introuvable dans le répertoire d'exécution.", m_CheminDllBridge), "CRITIQUE")
       	RENVOYER Faux
       FIN
       
       // Vérification du moteur QUIC de Microsoft (msquic.dll)
       SI PAS fFichierExiste(m_CheminDllMsQuic) ALORS
-      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Dépendance manquante : %1 introuvable. Le transport QUIC/UDP est impossible.", m_CheminDllMsQuic))
+      	_JournaliserErreur(ChaîneConstruit("[HTTP/3] Dépendance manquante : %1 introuvable. Le transport QUIC/UDP est impossible.", m_CheminDllMsQuic), "CRITIQUE")
       	RENVOYER Faux
       FIN
       
       RENVOYER Vrai
-      
      type : 458752
    -
      name : _PreparerCertificat
@@ -266,7 +261,7 @@ class :
       			_JournaliserInformation(ChaîneConstruit("[HTTP/3] Conteneur PFX généré avec succès : %1", m_CheminCertificatPfx))
       			RENVOYER Vrai
       		SINON
-      			_JournaliserErreur(ChaîneConstruit("[HTTP/3] Échec de conversion PEM vers PFX (Code : %1).", l_CodeRetour))
+      			_JournaliserErreur(ChaîneConstruit("[HTTP/3] Échec de conversion PEM vers PFX (Code : %1).", l_CodeRetour), "ERREUR")
       		FIN
       	SINON
       		// Le conteneur PFX actuel est déjà à jour
@@ -295,10 +290,9 @@ class :
       	_JournaliserInformation(ChaîneConstruit("[HTTP/3] Certificat auto-signé créé pour %1 (%2).", l_NomDomaine, m_CheminCertificatPfx))
       	RENVOYER Vrai
       SINON
-      	_JournaliserErreur("[HTTP/3] Impossible de générer le certificat auto-signé de secours.")
+      	_JournaliserErreur("[HTTP/3] Impossible de générer le certificat auto-signé de secours.", "ERREUR")
       	RENVOYER Faux
       FIN
-      
      type : 458752
    -
      name : _JournaliserInformation
@@ -312,11 +306,10 @@ class :
       
       SI m_Journal <> Null ALORS
       	// Tracé applicatif via l'instance de log de RaaD
-      
+      	m_Journal.EnregistrerErreur(a_Message, "", "INFO")
       SINON
       	Trace(a_Message)
       FIN
-      
      type : 458752
    -
      name : _JournaliserErreur
@@ -326,14 +319,13 @@ class :
       /// <summary>
       /// Journalise un message d'erreur sans lever d'alerte graphique à l'écran.
       /// </summary>
-      PROCÉDURE PRIVÉE _JournaliserErreur( a_Message est une chaîne )
+      PROCÉDURE PRIVÉE _JournaliserErreur(a_Message est une chaîne, a_NiveauGravite est une chaîne = "ERREUR", a_ContexteException est une chaîne = "")
       
       SI m_Journal <> Null ALORS
-      	m_Journal.LogErreur(a_Message)
+      	m_Journal.EnregistrerErreur(a_Message, "", a_NiveauGravite, a_ContexteException)
       SINON
-      	Trace(a_Message)
+      	Trace(ChaîneConstruit("[%1] %2 %3", a_NiveauGravite, a_Message, a_ContexteException))
       FIN
-      
      type : 458752
   procedure_templates : []
   property_templates : []

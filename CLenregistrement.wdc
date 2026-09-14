@@ -19,22 +19,27 @@ class :
       	m_condition					est une chaîne 
       	m_erreur					est une chaîne 
       	m_json						est une chaîne	// Représentation JSON de l'entité active 
-      	m_RequeteSQL				est une chaine	// Dernier code SQL exécuté par l'instance
+      	m_RequeteSQL				est une chaîne	// Dernier code SQL exécuté par l'instance
       	m_NomTable					est une chaîne	// Nom physique de la table / fichier HFSQL manipulé
       	m_CleUnique					est une chaîne	// Nom de la colonne constituant la clé primaire unique identifiée
       	m_ValeurCle					est une chaîne	// Valeur active de la clé primaire de l'enregistrement chargé
       	
       	// Paramètres d'accès HFSQL Client/Serveur
-      	m_ProviderBdd			est une chaîne	
-      	m_ServeurBdd			est une chaîne
-      	m_NomBaseDonnees		est une chaîne
-      	m_UtilisateurBdd		est une chaîne
-      	m_MotDePasseBdd			est une chaîne
+      	m_ProviderBdd				est une chaîne	
+      	m_ServeurBdd				est une chaîne
+      	m_NomBaseDonnees			est une chaîne
+      	m_UtilisateurBdd			est une chaîne
+      	m_MotDePasseBdd				est une chaîne
       	
       	// Nom logique unique de la session HFSQL pour l'action courante
-      	m_NomConnexion			est une chaîne	= ""
+      	m_NomConnexion				est une chaîne	= ""
+      	
+      	// Moteur de journalisation asynchrone
+      	m_Journal					est CLJournalisation dynamique
+      	
+      	// Référence partagée directe vers le moteur de cache autonome
+      	m_Cache						est ClCache dynamique
       fin
-      
      type : 131072
   procedures :
    -
@@ -54,97 +59,129 @@ class :
       
      type : 655360
    -
+     name : AssocierCache
+     procedure_id : 1891210886552449999
+     type_code : 12
+     code : |1+
+      // ==============================================================================
+      // Méthode : AssocierCache
+      // Rôle    : Lie l'instance partagée de ClCache par prise de référence (Opérateur <-)
+      // Version : WinDev 25 Strict (Réf PC SOFT 1515003)
+      // ==============================================================================
+      PROCÉDURE AssocierCache(a_Cache est ClCache)
+      
+      m_Cache <- a_Cache
+     type : 458752
+   -
      name : Init
      internal_properties : BQAAAAUAAAA8hxYh8NT7LRSzqVlUm63FeSLWqDaACT4vutQ1tRyK6waTMYTBkjB9IBg6+M6WNQ5s3Lz1tg6105gULa4k5Aw9twj6ImxKb2oGXupoStv0Z3RJJ8+7nCE+yueCfLFSrJEhgBedYhfD/A7J5GOino9yC3kNhJ6LTvX+u3r001Y2x/6aWgbnZoxpyMVNR3tvwj8zw2tMx8w=
      procedure_id : 1891210886552515520
      type_code : 12
      code : |1+
-      procédure Init(a_table est une chaîne)
+      procédure Init(a_Table est une chaîne)
       
       // on initialise la classe avec le nom de la table 
-      m_NomTable = a_table
-      indrub est un entier
+      m_NomTable = a_Table
+      LOCAL
+      	l_IndRub	est un entier	= 0
+      	l_ResRub	est une chaîne
+      	l_NomRub	est une chaîne
       
       // Extraction de la structure de la table 
       Connexion()
-      HChangeConnexion({m_NomTable,indFichier},{m_NomConnexion})
+      HChangeConnexion({m_NomTable, indFichier}, {m_NomConnexion})
       
+      l_ResRub = HListeClé(m_NomTable, hLstDétailPlus)
       
-      
-      l_ResRub est une chaîne = HListeClé(m_NomTable,hLstDétailPlus)
-      l_nomRub est une chaine  
-      
-      POUR TOUTE CHAÎNE l_rub DE l_ResRub SEPAREE PAR RC
-      	
-      	POUR TOUTE CHAÎNE l_desRub de l_rub SEPAREE PAR TAB
-      		selon indrub
-      			
-      			cas 0 : l_nomRub = l_desRub
-      			
-      			cas 4 : SI Val(l_desRub) = 1  ALORS m_CleUnique = l_nomRub
+      POUR TOUTE CHAÎNE l_Rub DE l_ResRub SÉPARÉE PAR RC
+      	l_IndRub = 0
+      	POUR TOUTE CHAÎNE l_DesRub DE l_Rub SÉPARÉE PAR TAB
+      		SELON l_IndRub
+      			CAS 0 : l_NomRub = l_DesRub
+      			CAS 4 : SI Val(l_DesRub) = 1 ALORS m_CleUnique = l_NomRub
       		FIN
       		
-      		 
-      		indrub++ 
-      		si indrub = 5 ou m_CleUnique <> "" alors sortir 
+      		l_IndRub++ 
+      		SI l_IndRub = 5 OU m_CleUnique <> "" ALORS SORTIR 
       	FIN
       
-      	si m_CleUnique <> "" ALORS SORTIR
+      	SI m_CleUnique <> "" ALORS SORTIR
       FIN
       
       CAS ERREUR:
       Déconnexion()
       m_erreur = ErreurInfo()
-      
-      
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Erreur HFSQL lors de l'introspection Init() sur la table '%1' : %2", m_NomTable, m_erreur), "", "ERREUR")
+      FIN
       
       CAS EXCEPTION:
       Déconnexion()
       m_erreur = ExceptionInfo()
-      
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Exception lors de l'introspection Init() sur la table '%1'", m_NomTable), "", "CRITIQUE", ExceptionInfo(errComplet))
+      FIN
      type : 458752
    -
      name : Charger
      procedure_id : 1891210886552581056
      type_code : 12
      code : |1-
-      procédure Charger(local a_valkey est une chaîne, a_condition est une chaîne)
+      procédure Charger(LOCAL a_ValKey est une chaîne, a_Condition est une chaîne = "", a_IgnorerCache est un booléen = Faux)
       
-      m_ValeurCle	= a_valkey
-      m_condition	= a_condition
+      m_ValeurCle	= a_ValKey
+      m_condition	= a_Condition
       
       LOCAL
-      	L_ReqSQL			est une source de données
-      	L_ResEnregistrement	est un Enregistrement 
-      	
+      	l_ReqSql			est une Source de Données
+      	l_ResEnregistrement	est un Enregistrement 
+      	l_CacheJsonTrouve	est une chaîne = ""
       
       SI m_ValeurCle <> "" ALORS
-      	m_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 where %2" , m_NomTable, m_CleUnique + " = " + m_ValeurCle )
+      	m_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2", m_NomTable, m_CleUnique + " = " + m_ValeurCle)
       SINON
-      	m_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 where %2" , m_NomTable, m_condition ) 
+      	m_RequeteSQL = ChaîneConstruit("SELECT * FROM %1 WHERE %2", m_NomTable, m_condition) 
+      FIN
+      
+      // Contrôle du micro-cache SQL autonome
+      SI PAS a_IgnorerCache ET m_Cache <> Null ALORS
+      	l_CacheJsonTrouve = m_Cache.ObtenirParSql(m_RequeteSQL)
+      	SI l_CacheJsonTrouve <> "" ALORS
+      		m_json   = l_CacheJsonTrouve
+      		m_erreur = ""
+      		RETOUR
+      	FIN
       FIN
       
       Connexion()
-      HExécuteRequêteSQL(L_ReqSQL,m_NomConnexion,hRequêteSansCorrection,m_RequeteSQL)
+      HExécuteRequêteSQL(l_ReqSql, m_NomConnexion, hRequêteSansCorrection, m_RequeteSQL)
+      
       // lire le premier enregistrement  
-      HLitPremier(L_ReqSQL)
-      FichierVersMémoire(L_ResEnregistrement,L_ReqSQL)
-      HAnnuleDéclaration(L_ReqSQL)
+      HLitPremier(l_ReqSql)
+      FichierVersMémoire(l_ResEnregistrement, l_ReqSql)
+      HAnnuleDéclaration(l_ReqSql)
       
-      //Sérialisation de l’enregistrement 
-      Sérialise(L_ResEnregistrement,m_json,psdJSON)
+      // Sérialisation de l’enregistrement 
+      Sérialise(l_ResEnregistrement, m_json, psdJSON)
       
+      // Mémorisation dans le micro-cache
+      SI m_Cache <> Null ET m_json <> "" ALORS
+      	m_Cache.MettreParSql(m_RequeteSQL, m_NomBaseDonnees, m_json)
+      FIN
       
       CAS ERREUR:
       Déconnexion()
       m_erreur = ErreurInfo()
-      
-      
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Erreur HFSQL Charger() sur la table '%1' (Clé: %2) : %3", m_NomTable, m_ValeurCle, m_erreur), "", "ERREUR")
+      FIN
       
       CAS EXCEPTION:
       Déconnexion()
       m_erreur = ExceptionInfo()
-      
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Exception Charger() sur la table '%1' (Clé: %2)", m_NomTable, m_ValeurCle), "", "CRITIQUE", ExceptionInfo(errComplet))
+      FIN
       
       FIN :
       Déconnexion()
@@ -154,7 +191,6 @@ class :
      procedure_id : 1891210886552646592
      type_code : 12
      code : |1-
-      
       // ==============================================================================
       // Méthode   : Modifier
       // Rôle      : Mise à jour sécurisée avec requêtes paramétrées anti-injection
@@ -174,6 +210,9 @@ class :
       // 1. Validation de surface : table et clé primaire obligatoires
       SI SansEspace(m_NomTable) = "" OU SansEspace(m_CleUnique) = "" ALORS
       	m_erreur = "Erreur ORM : Table ou clé unique non configurée."
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(m_erreur, "", "AVERTISSEMENT")
+      	FIN
       	RENVOYER Faux
       FIN
       
@@ -181,6 +220,9 @@ class :
       l_DonneesJson = JSONVersVariant(m_json)
       SI l_DonneesJson = Null ALORS
       	m_erreur = "Erreur ORM : Contenu JSON invalide ou vide."
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Échec de parsing JSON pour modification sur la table '%1'", m_NomTable), "", "AVERTISSEMENT")
+      	FIN
       	RENVOYER Faux
       FIN
       
@@ -212,6 +254,9 @@ class :
       // ==============================================================================
       SI SansEspace(l_ClauseWhere) = "" ALORS
       	m_erreur = "ALERTE SÉCURITÉ : Tentative d'UPDATE sans clause WHERE bloquée pour la table : " + m_NomTable
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(m_erreur, "", "SECURITE")
+      	FIN
       	RENVOYER Faux
       FIN
       
@@ -223,6 +268,9 @@ class :
       // 6. Ouverture de la connexion isolée du thread
       SI PAS :Connexion() ALORS
       	m_erreur = "Erreur ORM : Impossible d'ouvrir la connexion base de données."
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(m_erreur, "", "CRITIQUE")
+      	FIN
       	RENVOYER Faux
       FIN
       
@@ -232,16 +280,30 @@ class :
       l_SuccesExecution	= HExécuteRequêteSQL(l_SourceRequete, m_NomConnexion, hRequêteDéfaut, m_RequeteSQL)
       SI PAS l_SuccesExecution ALORS
       	m_erreur = HErreurInfo()
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Échec HExécuteRequêteSQL UPDATE sur '%1' : %2", m_NomTable, m_erreur), "", "ERREUR")
+      	FIN
+      SINON
+      	// Invalidation directe du cache pour cette table
+      	SI m_Cache <> Null ALORS
+      		m_Cache.InvaliderRessource(m_NomBaseDonnees, m_NomTable)
+      	FIN
       FIN
       
       RENVOYER l_SuccesExecution
       
       CAS ERREUR:
       m_erreur = HErreurInfo()
-      renvoyer  Faux
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Erreur d'exécution UPDATE sur la table '%1' : %2", m_NomTable, m_erreur), "", "ERREUR")
+      FIN
+      RENVOYER Faux
       
       CAS EXCEPTION:
       m_erreur = ExceptionInfo()
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Exception non interceptée lors de l'UPDATE sur '%1'", m_NomTable), "", "CRITIQUE", ExceptionInfo(errComplet))
+      FIN
       RENVOYER Faux
       
       FIN :
@@ -255,27 +317,37 @@ class :
      code : |1-
       procédure Creer()
       
+      LOCAL
+      	l_Enregistrement est un Enregistrement
+      
       Connexion()
-      HChangeConnexion({m_NomTable,indFichier},m_NomConnexion)
+      HChangeConnexion({m_NomTable, indFichier}, m_NomConnexion)
       
       HRAZ(m_NomTable)
-      {m_NomTable,indFichier} = _JsonVersEnregistrement()
-      HAjoute(m_NomTable,hAffecteParcours)
+      {m_NomTable, indFichier} = _JsonVersEnregistrement()
+      HAjoute(m_NomTable, hAffecteParcours)
       
-      l_enrg est un Enregistrement = {m_NomTable,indFichier}
-      Sérialise(l_enrg,m_json,psdJSON)
+      l_Enregistrement = {m_NomTable, indFichier}
+      Sérialise(l_Enregistrement, m_json, psdJSON)
       
+      // Invalidation directe du cache pour cette table
+      SI m_Cache <> Null ALORS
+      	m_Cache.InvaliderRessource(m_NomBaseDonnees, m_NomTable)
+      FIN
       
       CAS ERREUR:
       Déconnexion()
       m_erreur = ErreurInfo()
-      
-      
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Erreur HFSQL Creer() sur la table '%1' : %2", m_NomTable, m_erreur), "", "ERREUR")
+      FIN
       
       CAS EXCEPTION:
       Déconnexion()
       m_erreur = ExceptionInfo()
-      
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Exception Creer() sur la table '%1'", m_NomTable), "", "CRITIQUE", ExceptionInfo(errComplet))
+      FIN
       
       FIN :
       Déconnexion()
@@ -285,17 +357,26 @@ class :
      procedure_id : 1891210886552777664
      type_code : 12
      code : |1+
-      procédure privée _JsonVersEnregistrement():Enregistrement
+      procédure privée _JsonVersEnregistrement() : Enregistrement
       
-      VariantEnregistrement		est un variant	= JSONVersVariant(m_json)
-      NouvelEnregistrement	est un Enregistrement
-      NouvelEnregistrement = {m_NomTable,indFichier}
+      LOCAL
+      	l_VariantEnregistrement	est un Variant	= JSONVersVariant(m_json)
+      	l_NouvelEnregistrement	est un Enregistrement
+      	l_Indice				est un entier
       
-      POUR i=1 _a_ VariantEnregistrement..Membre..Occurrence
-      	{"NouvelEnregistrement."+VariantEnregistrement..Membre[i]..Nom} = VariantEnregistrement..Membre[i]..Valeur 	
+      l_NouvelEnregistrement = {m_NomTable, indFichier}
+      
+      QUAND EXCEPTION DANS
+      	POUR l_Indice = 1 _À_ l_VariantEnregistrement..Membre..Occurrence
+      		{"l_NouvelEnregistrement." + l_VariantEnregistrement..Membre[l_Indice]..Nom} = l_VariantEnregistrement..Membre[l_Indice]..Valeur 	
+      	FIN
+      FAIRE
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Exception lors de la conversion JSON vers Enregistrement sur '%1'", m_NomTable), "", "ERREUR", ExceptionInfo(errComplet))
+      	FIN
       FIN
       
-      renvoyer NouvelEnregistrement
+      RENVOYER l_NouvelEnregistrement
      type : 458752
    -
      name : ChargerCollection
@@ -303,7 +384,7 @@ class :
      type_code : 12
      code : |1+
       // Ajout du paramètre a_Operateur avec une valeur par défaut vide
-       PROCEDURE ChargerCollection(a_RubriqueFiltre est une chaîne = "", a_ValeurFiltre est une chaîne = "", a_Operateur est une chaîne = "")
+      PROCEDURE ChargerCollection(a_RubriqueFiltre est une chaîne = "", a_ValeurFiltre est une chaîne = "", a_Operateur est une chaîne = "", a_IgnorerCache est un booléen = Faux)
       
       // Blindage de l'accès aux données contre les corruptions d'index ou verrous HFSQL
       QUAND EXCEPTION DANS
@@ -312,7 +393,8 @@ class :
       		l_SourceDonnees				est une Source de Données
       		l_RequeteSQL				est une chaîne
       		l_OperateurSql				est une chaîne	= Minuscule(a_Operateur)
-      		l_tableauEnregistrements	est un tableau de Enregistrement
+      		l_TableauEnregistrements	est un tableau de Enregistrement
+      		l_CacheJsonTrouve			est une chaîne	= ""
       		// CONDITIONS ET OPÉRATEURS PRIS EN CHARGE PAR L'API :
       		// -----------------------------------------------------------------------------------------
       		// 1. "contient"    -> Recherche partielle floue  (SQL: LIKE '%valeur%')
@@ -347,19 +429,34 @@ class :
       		l_RequeteSQL = ChaîneConstruit("SELECT * FROM %1", m_NomTable)
       	FIN
       	
+      	m_RequeteSQL = l_RequeteSQL
+      	
+      	// Contrôle du micro-cache SQL autonome
+      	SI PAS a_IgnorerCache ET m_Cache <> Null ALORS
+      		l_CacheJsonTrouve = m_Cache.ObtenirParSql(l_RequeteSQL)
+      		SI l_CacheJsonTrouve <> "" ALORS
+      			m_json   = l_CacheJsonTrouve
+      			m_erreur = ""
+      			RETOUR
+      		FIN
+      	FIN
+      	
       	Connexion()
       	// Exécution SQL dans l'isolation du thread courant
-      	SI HExécuteRequêteSQL(l_SourceDonnees,m_NomConnexion, hRequêteDéfaut, l_RequeteSQL) ALORS
-      //		POUR TOUT l_SourceDonnees
-      //			l_VariantLigne = l_SourceDonnees
-      //			TableauAjoute(l_VariantTableau, l_VariantLigne)
-      //		FIN
-      //		m_json		= VariantVersJSON(l_VariantTableau)
-      		FichierVersTableau(l_tableauEnregistrements,l_SourceDonnees)
-      		Sérialise(l_tableauEnregistrements,m_json,psdJSON)
-      		m_erreur	= ""
+      	SI HExécuteRequêteSQL(l_SourceDonnees, m_NomConnexion, hRequêteDéfaut, l_RequeteSQL) ALORS
+      		FichierVersTableau(l_TableauEnregistrements, l_SourceDonnees)
+      		Sérialise(l_TableauEnregistrements, m_json, psdJSON)
+      		m_erreur = ""
+      		
+      		// Mémorisation dans le micro-cache
+      		SI m_Cache <> Null ET m_json <> "" ALORS
+      			m_Cache.MettreParSql(l_RequeteSQL, m_NomBaseDonnees, m_json)
+      		FIN
       	SINON
       		m_erreur = "{""erreur"": ""Erreur d'exécution HFSQL : " + Remplace(HErreurInfo(hErrMessage), """", "\""") + """}"
+      		SI m_Journal <> Null ALORS
+      			m_Journal.EnregistrerErreur(ChaîneConstruit("Erreur ChargerCollection() sur '%1' : %2", m_NomTable, HErreurInfo(hErrComplet)), "", "ERREUR")
+      		FIN
       	FIN
       	
       	HAnnuleDéclaration(l_SourceDonnees)
@@ -367,6 +464,9 @@ class :
       FAIRE
       	// Capture des ruptures de connexions ou crashs d'indirection
       	m_erreur = "{""erreur"": ""Le moteur de données a rencontré une exception fatale.""}"
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Exception ChargerCollection() sur '%1'", m_NomTable), "", "CRITIQUE", ExceptionInfo(errComplet))
+      	FIN
       FIN
       
       Déconnexion()
@@ -389,7 +489,7 @@ class :
       	// 1. INTROSPECTION DE LA STRUCTURE DE DONNÉES
       	// HListeRubrique renvoie les noms de toutes les colonnes de la requête, 
       	// séparés par des retours chariot (RC).
-      // =================================================================================
+      	// =================================================================================
       l_ListeRubriques = HListeRubrique(a_SourceDonnees)
       
       // =================================================================================
@@ -434,7 +534,7 @@ class :
       // =================================================================================
       // 3. RETOUR DE L'OBJET JSON
       // =================================================================================
-      renvoyer l_JsonGenere
+      RENVOYER l_JsonGenere
      type : 458752
    -
      name : SupprimerUnitaire
@@ -443,20 +543,24 @@ class :
      code : |1+
       PROCEDURE SupprimerUnitaire(a_ValeurCleUnique est une chaîne)
       
-      // 1. Recherche de l'enregistrement en base de données
-      // m_NomTable contient le nom de la table, m_CleUnique contient le nom de la clé primaire
       SI HLitRecherchePremier(m_NomTable, m_CleUnique, a_ValeurCleUnique) ALORS
-      	
-      	// 2. Suppression physique
       	SI HSupprime(m_NomTable) ALORS
       		m_erreur = ""
+      		SI m_Cache <> Null ALORS
+      			m_Cache.InvaliderRessource(m_NomBaseDonnees, m_NomTable)
+      		FIN
       	SINON
       		m_erreur = "{""erreur"": ""Impossible de supprimer l'enregistrement : " + HErreurInfo(hErrMessage) + """}"
+      		SI m_Journal <> Null ALORS
+      			m_Journal.EnregistrerErreur(ChaîneConstruit("Échec de suppression sur '%1' (Clé: %2) : %3", m_NomTable, a_ValeurCleUnique, HErreurInfo(hErrComplet)), "", "ERREUR")
+      		FIN
       	FIN
       SINON
       	m_erreur = "{""erreur"": ""Enregistrement introuvable avec la clé spécifiée.""}"
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Suppression impossible : Clé '%1' introuvable dans la table '%2'", a_ValeurCleUnique, m_NomTable), "", "AVERTISSEMENT")
+      	FIN
       FIN
-      
      type : 458752
    -
      name : SupprimerCollection
@@ -468,38 +572,35 @@ class :
       LOCAL
       	l_RequeteSQL est une chaîne
       	
-      // 1. Validation de sécurité : les filtres doivent être fournis pour éviter un DELETE global accidentel !
       SI a_RubriqueFiltre = "" OU a_ValeurFiltre = "" ALORS
       	m_erreur = "{""erreur"": ""Les paramètres 'rubrique' et 'valeur' sont obligatoires pour une suppression en masse.""}"
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("ALERTE SÉCURITÉ : Tentative de suppression en masse sans filtre sur la table '%1'", m_NomTable), "", "SECURITE")
+      	FIN
       	RETOUR
       FIN
       
-      // 2. Sécurisation anti-injection SQL sur la valeur (Échappement WinDev 25)
       a_ValeurFiltre	= Remplace(a_ValeurFiltre, "'", "''")
+      l_RequeteSQL	= ChaîneConstruit("DELETE FROM %1 WHERE %2 = '%3'", m_NomTable, a_RubriqueFiltre, a_ValeurFiltre)
       
-      // 3. Construction de la requête de suppression en masse
-      l_RequeteSQL	= ChaîneConstruit("DELETE FROM %1 WHERE %2 = '%3'", ...
-      m_NomTable, a_RubriqueFiltre, a_ValeurFiltre)
-      
-      // 4. Exécution directe de la requête de modification/suppression
-      // En WinDev 25, HExécuteRequêteSQL sans Source de Données exécute l'ordre directement en C/S
       SI PAS HExécuteRequêteSQL(l_RequeteSQL) ALORS
       	m_erreur = "{""erreur"": ""Échec de la suppression en masse : " + HErreurInfo(hErrMessage) + """}"
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Échec de la suppression en masse sur '%1' : %2", m_NomTable, HErreurInfo(hErrComplet)), "", "ERREUR")
+      	FIN
       SINON
       	m_erreur = ""
+      	SI m_Cache <> Null ALORS
+      		m_Cache.InvaliderRessource(m_NomBaseDonnees, m_NomTable)
+      	FIN
       FIN
-      
      type : 458752
    -
      name : ConfigurerAccesBdd
      procedure_id : 1917049530062857359
      type_code : 12
      code : |1+
-      // ==============================================================================
-      // Méthode : ConfigurerAccesBdd
-      // Rôle    : Stocke les coordonnées d'accès complètes (avec Provider)
-      // ==============================================================================
-      PROCÉDURE ConfigurerAccesBdd(a_Provider est une chaîne, a_Serveur est une chaîne, a_NomBase est une chaîne, a_Utilisateur est une chaîne, a_MotDePasse est une chaîne)
+      PROCÉDURE ConfigurerAccesBdd(a_Provider est une chaîne, a_Serveur est une chaîne, a_NomBase est une chaîne, a_Utilisateur est une chaîne, a_MotDePasse est une chaîne, a_Journal est CLJournalisation dynamique = Null)
       
       m_ProviderBdd		= SansEspace(a_Provider)
       m_ServeurBdd		= SansEspace(a_Serveur)
@@ -507,62 +608,43 @@ class :
       m_UtilisateurBdd	= SansEspace(a_Utilisateur)
       m_MotDePasseBdd		= a_MotDePasse
       
+      SI a_Journal <> Null ALORS
+      	m_Journal = a_Journal
+      FIN
      type : 458752
    -
      name : Connexion
      procedure_id : 1917049697566620903
      type_code : 12
      code : |1+
-      // ==============================================================================
-      // Méthode : Connexion
-      // Rôle    : Décrit et ouvre la session HFSQL dédiée en exploitant le Provider
-      // ==============================================================================
       PROCÉDURE Connexion() : booléen
       
       LOCAL
       	l_SuccesOuverture	est un booléen	= Faux
-      	//l_DescriptionCnx	est une Connexion
       	
-      // Sécurité : fermeture préventive en cas de reliquat
       SI m_NomConnexion <> "" ALORS
       	Déconnexion()
       FIN
       
-      // 1. Génération d'un nom de connexion STRICTEMENT unique au thread
-      m_NomConnexion					= "CNX_" + m_NomTable + "_" + DonneGUID(guidBrut)
-      //
-      //// 2. Affectation des propriétés via une variable Connexion locale
-      //l_DescriptionCnx..Provider		= (m_ProviderBdd <> "" ? m_ProviderBdd SINON "WinDevClientServeurHF")
-      //l_DescriptionCnx..Serveur		= m_ServeurBdd
-      //l_DescriptionCnx..BaseDeDonnées	= m_NomBaseDonnees
-      //l_DescriptionCnx..Utilisateur	= m_UtilisateurBdd
-      //l_DescriptionCnx..MotDePasse	= m_MotDePasseBdd
-      //
-      //HOuvreConnexion(l_DescriptionCnx)
-      
-      // 3. Déclaration de la connexion sous son nom unique dans le contexte du thread
-      HDécritConnexion(m_NomConnexion,m_UtilisateurBdd,m_MotDePasseBdd,m_ServeurBdd,m_NomBaseDonnees,m_ProviderBdd)
-      
-      // 4. Établissement de la liaison réseau vers le moteur HFSQL
+      m_NomConnexion = "CNX_" + m_NomTable + "_" + DonneGUID(guidBrut)
+      HDécritConnexion(m_NomConnexion, m_UtilisateurBdd, m_MotDePasseBdd, m_ServeurBdd, m_NomBaseDonnees, m_ProviderBdd)
       l_SuccesOuverture = HOuvreConnexion(m_NomConnexion)
       
       SI PAS l_SuccesOuverture ALORS
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Échec HOuvreConnexion pour la table '%1' [Connexion: %2]", m_NomTable, m_NomConnexion), "", "CRITIQUE", HErreurInfo(hErrComplet))
+      	FIN
       	m_NomConnexion = ""
-      	renvoyer  Faux
+      	RENVOYER Faux
       FIN
       
       RENVOYER Vrai
-      
      type : 458752
    -
      name : Déconnexion
      procedure_id : 1917051424143548012
      type_code : 12
      code : |1+
-      // ==============================================================================
-      // Méthode : Déconnexion
-      // Rôle    : Libère et clôture la session réseau HFSQL du thread en cours
-      // ==============================================================================
       PROCÉDURE Déconnexion()
       
       SI m_NomConnexion <> "" ALORS
@@ -570,7 +652,6 @@ class :
       	HAnnuleDéclaration(m_NomConnexion)
       	m_NomConnexion = ""
       FIN
-      
      type : 458752
   procedure_templates : []
   property_templates : []

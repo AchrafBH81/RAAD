@@ -18,11 +18,12 @@ class :
       CLServeurSocket est une Classe
       	m_ProcedureRappel			est une procédure
       Prive
-      	m_configuration   est CLConfiguration dynamique
-      	m_PortSocket		est un entier	= 5010
-      	m_NomSocketEcoute	est une chaine
-      	m_NomCanal			est une chaîne
-      	m_CheminPhpCgi      est une chaîne
+      	m_configuration				est CLConfiguration dynamique
+      	m_Journal					est CLJournalisation dynamique
+      	m_PortSocket				est un entier	= 5010
+      	m_NomSocketEcoute			est une chaîne
+      	m_NomCanal					est une chaîne
+      	m_CheminPhpCgi				est une chaîne
       fin
      type : 131072
   procedures :
@@ -41,15 +42,13 @@ class :
       procédure Destructeur()
       
       SocketFerme(m_NomSocketEcoute)
-      
      type : 655360
    -
      name : AttenteConnexion
      procedure_id : 1478780694846627284
      type_code : 12
      code : |1-
-      
-      procédure  AttenteConnexion() <métier>
+      procédure AttenteConnexion() <métier>
       
       SI SocketAttendConnexion(m_NomSocketEcoute) ALORS
       	
@@ -59,10 +58,16 @@ class :
       	
       	// Vérification de l'opération d'acceptation
       	// On lance un thread pour gérer cette connexion
-      	//sNomThread = sNomCanal
-      	SI m_NomCanal<>"" ALORS GestionConnexion(m_NomCanal)
+      	// sNomThread = sNomCanal
+      	SI m_NomCanal <> "" ALORS 
+      		GestionConnexion(m_NomCanal)
+      	SINON
+      		SI ErreurDétectée ET m_Journal <> Null ALORS
+      			m_Journal.EnregistrerErreur(ChaîneConstruit("Échec de SocketAccepte sur l'écouteur '%1' : %2", m_NomSocketEcoute, ErreurInfo(errComplet)), "", "AVERTISSEMENT")
+      		FIN
+      	FIN
       		
-      FIN	
+      FIN
      type : 458752
    -
      name : GestionConnexion
@@ -76,68 +81,67 @@ class :
       // Elle s'exécutera dans un thread (sans avoir besoin d'appeler la fonction ThreadExecute), sans utilisation de HFSQL
       // 
       
-      procédure privée GestionConnexion(local sNomConnexion est chaine)
+      procédure privée GestionConnexion(LOCAL a_NomConnexion est une chaîne)
       
+      LOCAL
+      	l_CanalSocket est un CLCanalSocket dynamique = new CLCanalSocket(m_configuration)
       
-      
-      l_CanalSocket est un CLCanalSocket dynamique = new CLCanalSocket(m_configuration)
-      
-      
-      
-      quand Exception dans
+      QUAND EXCEPTION DANS
       	
-      	l_CanalSocket.m_MessageSocketRecu	= SocketLit(sNomConnexion,Faux)
-      	si l_CanalSocket.m_MessageSocketRecu <> "" alors 
-      		l_CanalSocket.m_NomSocket		= sNomConnexion
-      		l_CanalSocket.m_AdresseClient	= SocketClientInfo(sNomConnexion,SocketAdresse)
+      	l_CanalSocket.m_MessageSocketRecu = SocketLit(a_NomConnexion, Faux)
+      	SI l_CanalSocket.m_MessageSocketRecu <> "" ALORS 
+      		l_CanalSocket.m_NomSocket		= a_NomConnexion
+      		l_CanalSocket.m_AdresseClient	= SocketClientInfo(a_NomConnexion, SocketAdresse)
       		
       		m_ProcedureRappel(l_CanalSocket)
       		
-      		SocketEcrit(sNomConnexion,l_CanalSocket.m_MessageSocketReponse)
-      	fin
-      	
+      		SocketEcrit(a_NomConnexion, l_CanalSocket.m_MessageSocketReponse)
+      	FIN
       	
       	// Fermeture de la socket
-      	SocketFerme(sNomConnexion)
+      	SocketFerme(a_NomConnexion)
       	
       FAIRE
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Exception réseau sur la socket cliente '%1'", a_NomConnexion), "", "ERREUR", ExceptionInfo(errComplet))
+      	FIN
       	
-      	SocketFerme(sNomConnexion)
+      	SocketFerme(a_NomConnexion)
       	
       FIN
-      
-      
-      		
      type : 458752
    -
      name : Demarre
      procedure_id : 1478780694846758356
      type_code : 12
      code : |1+
-      
-      
       procédure Demarre()
       
+      LOCAL
+      	l_ErreurSurvenue est une chaîne
       
-      SocketCrée(m_NomSocketEcoute,m_PortSOcket)
+      SocketCrée(m_NomSocketEcoute, m_PortSocket)
       
-      SocketChangeModeTransmission(m_NomSocketEcoute,SocketSansMarqueurFin)
+      SI ErreurDétectée ALORS
+      	l_ErreurSurvenue = ErreurInfo(errComplet)
+      	SI m_Journal <> Null ALORS
+      		m_Journal.EnregistrerErreur(ChaîneConstruit("Impossible de mettre en place la socket d'écoute '%1' sur le port %2 : %3", m_NomSocketEcoute, m_PortSocket, l_ErreurSurvenue), "", "CRITIQUE")
+      	FIN
+      	RETOUR
+      FIN
+      
+      SocketChangeModeTransmission(m_NomSocketEcoute, SocketSansMarqueurFin)
+      
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Socket d'écoute '%1' active sur le port %2 (Mode: SocketSansMarqueurFin).", m_NomSocketEcoute, m_PortSocket), "", "INFO")
+      FIN
       
       // =========================================================================
       // DÉMARRAGE DU REVERSE-PROXY HTTPS (Appel vers l'assemblage C#)
       // =========================================================================
       // On encapsule l'appel dans un ThreadExécute pour que la boucle infinie 
       // du code C# ne bloque pas le démarrage du serveur WLangage.
-      //ThreadExécute("Thread_Proxy_HTTPS", threadNormal,_LancerServeurHttpsEntrantAsync)
-      
-      
-      
-      SI ErreurDétectée ALORS
-      	//Erreur(<§$0001§> +m_PortSocket,ErreurINfo())
-      	FinProgramme()
-      FIN
-      
-      
+      // ThreadExécute("Thread_Proxy_HTTPS", threadNormal, _LancerServeurHttpsEntrantAsync)
      type : 458752
    -
      name : Arret
@@ -146,26 +150,11 @@ class :
      code : |1-
       procédure Arret()
       
-      SocketFerme(m_NomSocketEcoute)
-     type : 458752
-   -
-     name : _LancerServeurHttpsEntrantAsync
-     procedure_id : 1751625140919215284
-     type_code : 12
-     code : |1+
-      procédure privée _LancerServeurHttpsEntrantAsync()
-      
-      
-      QUAND EXCEPTION DANS
-      	
-      	// Appel de l'assemblage C# : On transmet les Buffers (byte[]) au lieu des chaînes (string)
-      	COL_RAAD.LancerServeurHttpsEntrantAsync(443, 8080, m_configuration.m_CheminCertSSL, m_configuration.m_CheminCleSSL)
-      	
-      FAIRE
-      	// Gestion silencieuse : on ne bloque jamais le thread avec une fenêtre Erreur()
-      	// TODO: Tracer l'exception dans le fichier log
-      	RETOUR
+      SI m_Journal <> Null ALORS
+      	m_Journal.EnregistrerErreur(ChaîneConstruit("Arrêt de l'écoute socket sur '%1'.", m_NomSocketEcoute), "", "INFO")
       FIN
+      
+      SocketFerme(m_NomSocketEcoute)
      type : 458752
   properties :
    -
@@ -189,14 +178,14 @@ class :
         code : |1+
          procédure publique P_PortSocket() :entier
          
-         renvoyer m_PortSOcket
+         renvoyer m_PortSocket
          
         type : 1966080
       -
         code : |1-
          procédure publique P_PortSocket(a_Valeur est un entier)
          
-         m_PortSOcket = a_Valeur
+         m_PortSocket = a_Valeur
         type : 2031616
      template_refs : []
    -
@@ -214,7 +203,7 @@ class :
         code : |1-
          procédure publique p_CheminPhpCgi(Valeur est une chaîne)
          
-         m_CheminPhpCgi=Valeur
+         m_CheminPhpCgi = Valeur
         type : 2031616
      template_refs : []
    -
@@ -226,7 +215,19 @@ class :
         code : |1-
          procédure publique P_CLconfiguration(Valeur est CLConfiguration)
          
-         m_configuration=Valeur
+         m_configuration = Valeur
+        type : 2031616
+     template_refs : []
+   -
+     name : P_CLjournalisation
+     identifier : 0x1a397d030051612c
+     type_code : 103
+     p_codes :
+      -
+        code : |1-
+         procédure publique P_CLjournalisation(Valeur est CLJournalisation)
+         
+         m_Journal = Valeur
         type : 2031616
      template_refs : []
   procedure_templates : []

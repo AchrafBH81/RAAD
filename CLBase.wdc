@@ -37,29 +37,32 @@ class :
      code : |1+
       procédure Destructeur()
       
+      // Clôture préventive de la connexion HFSQL à la destruction de l'objet
+      Déconnexion()
      type : 655360
    -
      name : Connexion
      procedure_id : 1466988909366778407
      type_code : 12
      code : |1-
+      procédure Connexion() : booléen
       
-      procédure Connexion()
-      
-      si pas HOuvreConnexion(m_connexion) ALORS
-      	m_journal.LogErreur("impossible de se connecter au serveur de base de données")
-      	renvoyer faux
+      SI PAS HOuvreConnexion(m_connexion) ALORS
+      	SI m_journal <> Null ALORS
+      		m_journal.EnregistrerErreur("Impossible de se connecter au serveur de base de données HFSQL.", "", "CRITIQUE", HErreurInfo(hErrComplet))
+      	FIN
+      	RENVOYER Faux
       FIN
       
-      renvoyer vrai
+      RENVOYER Vrai
      type : 458752
    -
      name : ChargeConfiguration
      procedure_id : 1466989008151115314
      type_code : 12
      code : |1-
-      
       procédure ChargeConfiguration()
+      
       // On adapte la lecture de la base de données avec la nouvelle syntaxe
       m_connexion..Provider		= m_Configuration.LireParametreBDD("Provider", "WinDevClientServeurHF")
       m_connexion..Serveur		= m_Configuration.LireParametreBDD("Serveur", "127.0.0.1")
@@ -72,27 +75,27 @@ class :
      procedure_id : 1467412083909462928
      type_code : 12
      code : |1+
-      
       // ==============================================================================
       // Méthode : Initialisation
       // Rôle    : Initialise les prototypes et injecte le Provider BDD
       // ==============================================================================
       PROCÉDURE Initialisation(a_Configuration est un CLConfiguration, a_Journal est un CLJournalisation dynamique)
       
-      
-      
-      
       LOCAL
       	l_ListeTables		est une chaîne
       	l_NomTableCourante	est une chaîne
       	l_Indice			est un entier	= 1
+      	l_NombreTables		est un entier	= 0
       	
       	l_Provider			est une chaîne
       	l_Serveur			est une chaîne
       	l_NomBase			est une chaîne
       	l_Utilisateur		est une chaîne
       	l_MotDePasse		est une chaîne
-      	
+      
+      m_Configuration	= a_Configuration
+      m_journal		= a_Journal
+      
       // 1. Lecture des coordonnées complètes depuis config.conf
       l_Provider		= a_Configuration.LireParametreBDD("Provider", "WinDevClientServeurHF")
       l_Serveur		= a_Configuration.LireParametreBDD("Serveur", "127.0.0.1")
@@ -100,30 +103,49 @@ class :
       l_Utilisateur	= a_Configuration.LireParametreBDD("Utilisateur", "admin")
       l_MotDePasse	= a_Configuration.LireParametreBDD("MotDePasse", "")
       
-      
-      
-      m_Configuration		= a_Configuration
-      m_journal			= a_Journal
       ChargeConfiguration()
-      Connexion()
-      // 2. Découverte de toutes les tables du schéma
       
-      l_ListeTables	= Remplace(HListeFichier(m_connexion),[".FIC",".fic"],"")
-      
-      BOUCLE
-      	l_NomTableCourante = ExtraitChaîne(l_ListeTables, l_Indice, RC)
-      	SI l_NomTableCourante = EOT OU l_NomTableCourante = "" ALORS SORTIR
-      	
-      	HDéclareExterne(l_NomTableCourante+".fic",l_NomTableCourante,m_connexion)
-      	l_NouveauRecord		est un dynamique CLEnregistrement = new CLEnregistrement
-      	l_NouveauRecord.ConfigurerAccesBdd(l_Provider, l_Serveur, l_NomBase, l_Utilisateur, l_MotDePasse)
-      	l_NouveauRecord.Init(l_NomTableCourante)
-      	
-      	// Enregistrement dans le dictionnaire des prototypes
-      	m_Table[l_NomTableCourante] = l_NouveauRecord
-      	
-      	l_Indice++
+      SI PAS Connexion() ALORS
+      	SI m_journal <> Null ALORS
+      		m_journal.EnregistrerErreur("Échec d'initialisation de l'ORM : Connexion BDD impossible.", "", "CRITIQUE")
+      	FIN
+      	RETOUR
       FIN
+      
+      QUAND EXCEPTION DANS
+      	// 2. Découverte de toutes les tables du schéma
+      	l_ListeTables = Remplace(HListeFichier(m_connexion), [".FIC", ".fic"], "")
+      	
+      	BOUCLE
+      		l_NomTableCourante = ExtraitChaîne(l_ListeTables, l_Indice, RC)
+      		SI l_NomTableCourante = EOT OU l_NomTableCourante = "" ALORS SORTIR
+      		
+      		SI PAS HDéclareExterne(l_NomTableCourante + ".fic", l_NomTableCourante, m_connexion) ALORS
+      			SI m_journal <> Null ALORS
+      				m_journal.EnregistrerErreur(ChaîneConstruit("Échec HDéclareExterne sur la table '%1'", l_NomTableCourante), "", "ERREUR", HErreurInfo(hErrComplet))
+      			FIN
+      		SINON
+      			l_NouveauRecord est un dynamique CLEnregistrement = new CLEnregistrement
+      			l_NouveauRecord.ConfigurerAccesBdd(l_Provider, l_Serveur, l_NomBase, l_Utilisateur, l_MotDePasse)
+      			l_NouveauRecord.Init(l_NomTableCourante)
+      			
+      			// Enregistrement dans le dictionnaire des prototypes
+      			m_Table[l_NomTableCourante] = l_NouveauRecord
+      			l_NombreTables++
+      		FIN
+      		
+      		l_Indice++
+      	FIN
+      	
+      	SI m_journal <> Null ALORS
+      		m_journal.EnregistrerErreur(ChaîneConstruit("Initialisation du schéma HFSQL réussie : %1 prototype(s) de table indexé(s).", l_NombreTables), "", "INFO")
+      	FIN
+      FAIRE
+      	SI m_journal <> Null ALORS
+      		m_journal.EnregistrerErreur("Exception critique lors de l'initialisation des prototypes BDD.", "", "CRITIQUE", ExceptionInfo(errComplet))
+      	FIN
+      FIN
+      
       Déconnexion()
      type : 458752
    -
@@ -131,7 +153,6 @@ class :
      procedure_id : 1467703574750733481
      type_code : 12
      code : |1+
-      
       procédure Déconnexion()
       
       HFermeConnexion(m_connexion)
@@ -141,23 +162,39 @@ class :
      procedure_id : 1467723666608162313
      type_code : 12
      code : |1-
+      procédure ExecuteSQL(LOCAL a_CodeSql est une chaîne)
       
-      procédure ExecuteSQL(local a_CodeSql)
-      Local 
-      	l_res		est un tableau de Enregistrement
-      	L_RequeteHttpSQL		est une source de données                         	
+      LOCAL 
+      	l_Res				est un tableau de Enregistrement
+      	l_RequeteHttpSql	est une Source de Données
       	
-      	
-      Connexion()
+      SI PAS Connexion() ALORS
+      	SI m_journal <> Null ALORS
+      		m_journal.EnregistrerErreur(ChaîneConstruit("Impossible d'exécuter la requête SQL [Connexion BDD refusée] : %1", a_CodeSql), "", "ERREUR")
+      	FIN
+      	RENVOYER l_Res
+      FIN
       
-      HExécuteRequêteSQL(L_RequeteHttpSQL,m_connexion,hRequêteSansCorrection,a_CodeSql)
+      QUAND EXCEPTION DANS
+      	SI PAS HExécuteRequêteSQL(l_RequeteHttpSql, m_connexion, hRequêteSansCorrection, a_CodeSql) ALORS
+      		SI m_journal <> Null ALORS
+      			m_journal.EnregistrerErreur(ChaîneConstruit("Échec d'exécution SQL direct [%1]", a_CodeSql), "", "ERREUR", HErreurInfo(hErrComplet))
+      		FIN
+      	SINON
+      		// Sérialisation de l'élément
+      		FichierVersTableau(l_Res, l_RequeteHttpSql)
+      	FIN
+      FAIRE
+      	SI m_journal <> Null ALORS
+      		m_journal.EnregistrerErreur(ChaîneConstruit("Exception lors de l'exécution SQL directe [%1]", a_CodeSql), "", "CRITIQUE", ExceptionInfo(errComplet))
+      	FIN
+      FIN
       
-      // Sérialisation de l'élément
-      FichierVersTableau(l_res,L_RequeteHttpSQL)
-      
+      // Libération de la mémoire de la requête et déconnexion obligatoire
+      HAnnuleDéclaration(l_RequeteHttpSql)
       Déconnexion()
       
-      renvoyer l_res
+      RENVOYER l_Res
      type : 458752
   procedure_templates : []
   property_templates : []

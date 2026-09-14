@@ -1,0 +1,644 @@
+#To edit and compare internal_properties, use WINDEV integrated tools.
+#Internal properties refer to the properties of controls in windows, reports, etc.
+info :
+ name : ClCache
+ major_version : 25
+ minor_version : 0
+ type : 4
+ description : ""
+ subtype : 0
+class :
+ identifier : 0x1aa5c49e005a9bf4
+ internal_properties : BQAAAAUAAAB2/vstTMCJbS/hlxjFxirSqKvCUuv8YxgpWyl7S3iA
+ code_elements :
+  type_code : 10
+  p_codes :
+   -
+     code : |1+
+      // ==============================================================================
+      // Classe   : ClCache
+      // Rôle     : Moteur de cache autonome, thread-safe, avec worker thread d'audit
+      // Version  : WinDev 25 Strict
+      // ==============================================================================
+      
+      // Structure Win32 pour le contrôle de charge mémoire de la machine hôte
+      STRUCTURE_MEMOIRE_WINDOWS_CACHE est une Structure
+      	TailleStructure                   est un entier sur 4 octets sans signe
+      	ChargeMemoire                     est un entier sur 4 octets sans signe
+      	MemoirePhysiqueTotale             est un entier sur 8 octets sans signe
+      	MemoirePhysiqueDisponible         est un entier sur 8 octets sans signe
+      	FichierEchangeTotal               est un entier sur 8 octets sans signe
+      	FichierEchangeDisponible          est un entier sur 8 octets sans signe
+      	MemoireVirtuelleTotale            est un entier sur 8 octets sans signe
+      	MemoireVirtuelleDisponible        est un entier sur 8 octets sans signe
+      	MemoireVirtuelleEtendueDisponible est un entier sur 8 octets sans signe
+      FIN
+      
+      // Structure d'une entrée stockée en mémoire vive
+      STEntreeCache est une Structure
+      	m_DonneesPayload         est un buffer              // Payload JSON compressé ou brut
+      	m_EstCompresse           est un booléen             // Vrai si compressé avec zipDeflate
+      	m_TailleOriginale        est un entier sur 8 octets // Taille réelle avant compression
+      	m_DateHeureExpiration    est une DateHeure           // Date limite TTL
+      	m_Espace                 est une chaîne              // Alias de base / Tenant
+      	m_TableauTablesImpactees est un tableau de chaînes   // Tables impliquées (FROM + JOIN)
+      	m_CodeSqlBrut            est une chaîne              // Traçabilité SQL
+      	m_NombreAcces            est un entier sur 8 octets  // Compteur LFU
+      	m_DateDernierAcces       est une DateHeure           // Horodatage du dernier HIT
+      FIN
+      
+      // Structure de tri pour l'éviction par popularité (LFU)
+      STEvictionScore est une Structure
+      	m_CleEmpreinte           est une chaîne
+      	m_NombreAcces            est un entier sur 8 octets
+      FIN
+      
+      ClCache est une Classe
+      	
+      	// --- État et Contrôle d'Exécution ---
+      	m_Actif                      est un booléen              // Piloté par config.conf
+      	m_ArretDemande               est un booléen              // Signal d'arrêt pour le thread de fond
+      	m_NomThreadMaintenance       est une chaîne              // Identifiant unique du thread de maintenance
+      	
+      	// --- Synchronisation Multithread ---
+      	m_NomSectionCritique         est une chaîne
+      	
+      	// --- Dictionnaire Mémoire RAM (Clé = Hash SHA-256 du SQL) ---
+      	m_DictionnaireCache          est un tableau associatif de STEntreeCache
+      	
+      	// --- Paramètres Matériels et Rétention ---
+      	m_DureeDefautSecondes        est un entier
+      	m_SeuilMaxRamPourcentage     est un entier               // Plafond max RAM hôte (ex: 60%)
+      	m_SeuilCompressionOctets     est un entier               // Seuil d'activation zipDeflate
+      	
+      	// --- Analyse de Churn par Table ---
+      	m_CompteurLecturesParTable   est un tableau associatif d'entiers sur 8 octets
+      	m_CompteurEcrituresParTable  est un tableau associatif d'entiers sur 8 octets
+      	
+      	// --- Télémétrie Globale de Supervision ---
+      	m_TotalHits                  est un entier sur 8 octets
+      	m_TotalMiss                  est un entier sur 8 octets
+      	m_TotalEvictionsRam          est un entier sur 8 octets
+      	m_TotalRejetsRamPlafond      est un entier sur 8 octets
+      	m_TotalRejetsTableVolatile   est un entier sur 8 octets
+      	m_TotalPayloadsCompresses    est un entier sur 8 octets
+      	
+      FIN
+     type : 131072
+  procedures :
+   -
+     name : Constructeur
+     procedure_id : 1920156999033265140
+     type_code : 27
+     code : |1+
+      /// <summary>
+      /// Constructeur : initialise les paramètres du cache autonome.
+      /// </summary>
+      PROCÉDURE Constructeur(a_DureeDefautSecondes est un entier = 30, a_SeuilMaxRamPourcentage est un entier = 60, a_SeuilCompressionOctets est un entier = 4096, a_Actif est un booléen = Vrai)
+      
+      m_Actif                    = a_Actif
+      m_ArretDemande             = Faux
+      m_NomSectionCritique       = "SECTION_CRITIQUE_RAAD_CLCACHE"
+      m_NomThreadMaintenance     = "THREAD_MAINTENANCE_CACHE_" + DonneGUID(guidBrut)
+      m_DureeDefautSecondes      = a_DureeDefautSecondes
+      m_SeuilMaxRamPourcentage   = a_SeuilMaxRamPourcentage
+      m_SeuilCompressionOctets   = a_SeuilCompressionOctets
+      
+      m_TotalHits                = 0
+      m_TotalMiss                = 0
+      m_TotalEvictionsRam        = 0
+      m_TotalRejetsRamPlafond    = 0
+      m_TotalRejetsTableVolatile = 0
+      m_TotalPayloadsCompresses  = 0
+     type : 589824
+   -
+     name : Destructeur
+     procedure_id : 1920156999033330676
+     type_code : 28
+     code : |1+
+      /// <summary>
+      /// Destructeur : clôture ordonnée du worker thread et libération de la RAM.
+      /// </summary>
+      PROCÉDURE Destructeur()
+      
+      Arreter()
+      SupprimeTout(m_DictionnaireCache)
+      SupprimeTout(m_CompteurLecturesParTable)
+      SupprimeTout(m_CompteurEcrituresParTable)
+     type : 655360
+   -
+     name : Demarrer
+     procedure_id : 1920156999033330687
+     type_code : 12
+     code : |1-
+      /// <summary>
+      /// Démarre le worker thread de maintenance autonome en arrière-plan.
+      /// </summary>
+      PROCÉDURE Demarrer()
+      
+      SI PAS m_Actif ALORS RETOUR
+      
+      m_ArretDemande = Faux
+      ThreadExécute(m_NomThreadMaintenance, threadNormal, _BoucleMaintenance)
+     type : 458752
+   -
+     name : Arreter
+     procedure_id : 1920314014450531248
+     type_code : 12
+     code : |1-
+      PROCÉDURE Arreter()
+      
+      SI m_ArretDemande ALORS RETOUR
+      
+      // 1. Signalisation d'arrêt au worker
+      m_ArretDemande = Vrai
+      
+      // 2. Attente de la clôture du thread (délai max : 300 centièmes de seconde = 3 secondes)
+      // Si le thread est déjà terminé ou inexistant, ThreadAttend rend la main immédiatement
+      ThreadAttend(m_NomThreadMaintenance, 300)
+     type : 458752
+   -
+     name : _BoucleMaintenance
+     procedure_id : 1920156999033330689
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Tâche de fond périodique : purge TTL et veille sur la RAM hôte Windows.
+      /// </summary>
+      PROCÉDURE PRIVÉE _BoucleMaintenance()
+      
+      LOCAL
+      	l_ChargeRamActuelle est un entier
+      
+      BOUCLE
+      	SI m_ArretDemande ALORS SORTIR
+      	
+      	// Pause non bloquante de 3 secondes entre deux vérifications
+      	ThreadPause(300)
+      	
+      	SI m_ArretDemande ALORS SORTIR
+      	
+      	SectionCritiqueDébut(m_NomSectionCritique)
+      	
+      	// 1. Purge des entrées expirées selon leur TTL
+      	_NettoyerEntreesExpirees()
+      	
+      	// 2. Vérification proactive du garde-fou RAM
+      	l_ChargeRamActuelle = _ObtenirChargeRamActuelle()
+      	SI l_ChargeRamActuelle >= m_SeuilMaxRamPourcentage ALORS
+      		_PurgerMoinsFrequents(20)
+      	FIN
+      	
+      	SectionCritiqueFin(m_NomSectionCritique)
+      FIN
+     type : 458752
+   -
+     name : ObtenirParSql
+     procedure_id : 1920156999033330677
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Recherche en RAM par empreinte SQL. Décompresse à la volée si nécessaire.
+      /// </summary>
+      PROCÉDURE ObtenirParSql(a_CodeSql est une chaîne) : chaîne
+      
+      LOCAL
+      	l_EmpreinteSql      est une chaîne
+      	l_ReponseJson       est une chaîne = ""
+      	l_DateHeureActuelle est une DateHeure = DateHeureSys()
+      	l_BufferCompresse   est un buffer
+      	l_NomTable          est une chaîne
+      
+      SI PAS m_Actif OU SansEspace(a_CodeSql) = "" ALORS RENVOYER ""
+      
+      l_EmpreinteSql = CalculerEmpreinteSql(a_CodeSql)
+      
+      SectionCritiqueDébut(m_NomSectionCritique)
+      
+      SI m_DictionnaireCache[l_EmpreinteSql]..Existe ALORS
+      	SI m_DictionnaireCache[l_EmpreinteSql].m_DateHeureExpiration > l_DateHeureActuelle ALORS
+      		m_DictionnaireCache[l_EmpreinteSql].m_NombreAcces++
+      		m_DictionnaireCache[l_EmpreinteSql].m_DateDernierAcces = l_DateHeureActuelle
+      		m_TotalHits++
+      		
+      		POUR TOUT l_NomTable DE m_DictionnaireCache[l_EmpreinteSql].m_TableauTablesImpactees
+      			m_CompteurLecturesParTable[l_NomTable]++
+      		FIN
+      		
+      		SI m_DictionnaireCache[l_EmpreinteSql].m_EstCompresse ALORS
+      			l_BufferCompresse = m_DictionnaireCache[l_EmpreinteSql].m_DonneesPayload
+      			l_ReponseJson     = Décompresse(l_BufferCompresse)
+      		SINON
+      			l_ReponseJson     = m_DictionnaireCache[l_EmpreinteSql].m_DonneesPayload
+      		FIN
+      	SINON
+      		Supprime(m_DictionnaireCache, l_EmpreinteSql)
+      		m_TotalMiss++
+      	FIN
+      SINON
+      	m_TotalMiss++
+      FIN
+      
+      SectionCritiqueFin(m_NomSectionCritique)
+      
+      RENVOYER l_ReponseJson
+     type : 458752
+   -
+     name : MettreParSql
+     procedure_id : 1920156999033330678
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Mémorise une réponse JSON avec compression sélective en RAM.
+      /// </summary>
+      PROCÉDURE MettreParSql(a_CodeSql est une chaîne, a_Espace est une chaîne, a_ReponseJson est une chaîne, a_DureeSecondes est un entier = 0)
+      
+      LOCAL
+      	l_EmpreinteSql           est une chaîne
+      	l_Entree                 est une STEntreeCache
+      	l_DureeReelle            est un entier
+      	l_TableauTablesImpactees est un tableau de chaînes
+      	l_ChargeRamActuelle      est un entier
+      	l_TailleJson             est un entier sur 8 octets
+      	l_TamponACompresser      est un buffer
+      
+      SI PAS m_Actif OU a_ReponseJson = "" OU SansEspace(a_CodeSql) = "" ALORS RETOUR
+      
+      l_TailleJson             = Taille(a_ReponseJson)
+      l_TableauTablesImpactees = _ExtraireTablesRequete(a_CodeSql)
+      
+      SectionCritiqueDébut(m_NomSectionCritique)
+      
+      // 1. Contrôle anti-churn
+      SI _EstRequeteVolatile(l_TableauTablesImpactees) ALORS
+      	m_TotalRejetsTableVolatile++
+      	SectionCritiqueFin(m_NomSectionCritique)
+      	RETOUR
+      FIN
+      
+      // 2. Contrôle du garde-fou RAM
+      l_ChargeRamActuelle = _ObtenirChargeRamActuelle()
+      SI l_ChargeRamActuelle >= m_SeuilMaxRamPourcentage ALORS
+      	_PurgerMoinsFrequents(25)
+      	l_ChargeRamActuelle = _ObtenirChargeRamActuelle()
+      	SI l_ChargeRamActuelle >= m_SeuilMaxRamPourcentage ALORS
+      		m_TotalRejetsRamPlafond++
+      		SectionCritiqueFin(m_NomSectionCritique)
+      		RETOUR
+      	FIN
+      FIN
+      
+      // 3. Compression sélective zipDeflate
+      l_Entree.m_TailleOriginale = l_TailleJson
+      SI l_TailleJson >= m_SeuilCompressionOctets ALORS
+      	l_TamponACompresser          = a_ReponseJson
+      	l_Entree.m_DonneesPayload    = Compresse(l_TamponACompresser, compresseGZIP)
+      	l_Entree.m_EstCompresse      = Vrai
+      	m_TotalPayloadsCompresses++
+      SINON
+      	l_Entree.m_DonneesPayload    = a_ReponseJson
+      	l_Entree.m_EstCompresse      = Faux
+      FIN
+      
+      // 4. Indexation sous empreinte SHA-256
+      l_EmpreinteSql                       = CalculerEmpreinteSql(a_CodeSql)
+      l_DureeReelle                        = (a_DureeSecondes > 0 ? a_DureeSecondes SINON m_DureeDefautSecondes)
+      
+      l_Entree.m_Espace                    = Minuscule(SansEspace(a_Espace))
+      l_Entree.m_TableauTablesImpactees    = l_TableauTablesImpactees
+      l_Entree.m_CodeSqlBrut               = a_CodeSql
+      l_Entree.m_NombreAcces               = 1
+      l_Entree.m_DateDernierAcces          = DateHeureSys()
+      l_Entree.m_DateHeureExpiration       = DateHeureSys()
+      l_Entree.m_DateHeureExpiration..Seconde += l_DureeReelle
+      
+      m_DictionnaireCache[l_EmpreinteSql] = l_Entree
+      
+      SectionCritiqueFin(m_NomSectionCritique)
+     type : 458752
+   -
+     name : InvaliderRessource
+     procedure_id : 1920156999033330679
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Invalide toute requête impliquant la table modifiée et incrémente son churn.
+      /// </summary>
+      PROCÉDURE InvaliderRessource(a_Espace est une chaîne, a_NomTable est une chaîne = "")
+      
+      LOCAL
+      	l_EspaceCible           est une chaîne = Minuscule(SansEspace(a_Espace))
+      	l_TableCible            est une chaîne = Minuscule(SansEspace(a_NomTable))
+      	l_TableauClesASupprimer est un tableau de chaînes
+      	l_CleCourante           est une chaîne
+      	l_IndiceCle             est un entier
+      	l_TableImpactee         est une chaîne
+      	l_DoitSupprimer         est un booléen
+      
+      SI PAS m_Actif ALORS RETOUR
+      
+      SectionCritiqueDébut(m_NomSectionCritique)
+      
+      SI l_TableCible <> "" ALORS
+      	m_CompteurEcrituresParTable[l_TableCible]++
+      FIN
+      
+      POUR TOUT l_Entree, l_CleCourante DE m_DictionnaireCache
+      	SI l_Entree.m_Espace = l_EspaceCible ALORS
+      		SI l_TableCible = "" ALORS
+      			TableauAjoute(l_TableauClesASupprimer, l_CleCourante)
+      		SINON
+      			l_DoitSupprimer = Faux
+      			POUR TOUT l_TableImpactee DE l_Entree.m_TableauTablesImpactees
+      				SI l_TableImpactee = l_TableCible ALORS
+      					l_DoitSupprimer = Vrai
+      					SORTIR
+      				FIN
+      			FIN
+      			
+      			SI l_DoitSupprimer ALORS
+      				TableauAjoute(l_TableauClesASupprimer, l_CleCourante)
+      			FIN
+      		FIN
+      	FIN
+      FIN
+      
+      POUR l_IndiceCle = 1 À TableauOccurrence(l_TableauClesASupprimer)
+      	Supprime(m_DictionnaireCache, l_TableauClesASupprimer[l_IndiceCle])
+      FIN
+      
+      SectionCritiqueFin(m_NomSectionCritique)
+     type : 458752
+   -
+     name : CalculerEmpreinteSql
+     procedure_id : 1920156999033330680
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Calcule l'empreinte SHA-256 normalisée de l'instruction SQL.
+      /// </summary>
+      PROCÉDURE CalculerEmpreinteSql(a_CodeSql est une chaîne) : chaîne
+      
+      LOCAL
+      	l_SqlNormalise    est une chaîne = Minuscule(SansEspace(a_CodeSql))
+      	l_EmpreinteBuffer est un buffer  = HashChaîne(HA_SHA_256, l_SqlNormalise)
+      
+      RENVOYER Majuscule(BufferVersHexa(l_EmpreinteBuffer))
+     type : 458752
+   -
+     name : ObtenirMetriquesTelemetrie
+     procedure_id : 1920156999033330681
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Retourne un objet Variant contenant les métriques complètes du cache.
+      /// </summary>
+      PROCÉDURE ObtenirMetriquesTelemetrie()
+      
+      LOCAL
+      	l_Metriques       est un Variant
+      	l_TotalDemandes   est un entier sur 8 octets
+      	l_RatioEfficacite est un réel = 0.0
+      
+      SectionCritiqueDébut(m_NomSectionCritique)
+      
+      l_TotalDemandes = m_TotalHits + m_TotalMiss
+      SI l_TotalDemandes > 0 ALORS
+      	l_RatioEfficacite = Arrondi((m_TotalHits * 100.0) / l_TotalDemandes, 2)
+      FIN
+      
+      l_Metriques.actif                 = m_Actif
+      l_Metriques.entrees_actives       = m_DictionnaireCache..Occurrence
+      l_Metriques.hits_total            = m_TotalHits
+      l_Metriques.miss_total            = m_TotalMiss
+      l_Metriques.ratio_hit_pct         = l_RatioEfficacite
+      l_Metriques.seuil_ram_limite      = m_SeuilMaxRamPourcentage
+      l_Metriques.charge_ram_actuelle   = _ObtenirChargeRamActuelle()
+      l_Metriques.seuil_compression_oct = m_SeuilCompressionOctets
+      l_Metriques.payloads_compresse    = m_TotalPayloadsCompresses
+      l_Metriques.rejets_seuil_ram      = m_TotalRejetsRamPlafond
+      l_Metriques.rejets_table_volatile = m_TotalRejetsTableVolatile
+      l_Metriques.evictions_lfu         = m_TotalEvictionsRam
+      
+      SectionCritiqueFin(m_NomSectionCritique)
+      
+      RENVOYER l_Metriques
+     type : 458752
+   -
+     name : _ExtraireTablesRequete
+     procedure_id : 1920156999033330682
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Analyseur lexical extrayant les noms de tables dans les clauses FROM et JOIN.
+      /// </summary>
+      PROCÉDURE PRIVÉE _ExtraireTablesRequete(a_CodeSql est une chaîne) : tableau de chaînes
+      
+      LOCAL
+      	l_TableauTablesImpactees est un tableau de chaînes
+      	l_SqlTravail             est une chaîne
+      	l_ListeMots              est un tableau de chaînes
+      	l_MotCourant             est une chaîne
+      	l_DoitCapturerTable      est un booléen = Faux
+      	l_DansClauseFrom         est un booléen = Faux
+      	l_IndiceMot              est un entier
+      	l_NomTableExtrait        est une chaîne
+      
+      l_SqlTravail = Remplace(a_CodeSql, RC, " ")
+      l_SqlTravail = Remplace(l_SqlTravail, Caract(10), " ")
+      l_SqlTravail = Remplace(l_SqlTravail, Caract(13), " ")
+      l_SqlTravail = Remplace(l_SqlTravail, TAB, " ")
+      l_SqlTravail = Remplace(l_SqlTravail, ",", " , ")
+      l_SqlTravail = Remplace(l_SqlTravail, "(", " ")
+      l_SqlTravail = Remplace(l_SqlTravail, ")", " ")
+      l_SqlTravail = Remplace(l_SqlTravail, ";", " ")
+      
+      ChaîneVersTableau(l_SqlTravail, l_ListeMots, " ")
+      
+      POUR l_IndiceMot = 1 À TableauOccurrence(l_ListeMots)
+      	l_MotCourant = SansEspace(l_ListeMots[l_IndiceMot])
+      	SI l_MotCourant = "" ALORS CONTINUER
+      	
+      	SELON Majuscule(l_MotCourant)
+      		CAS "WHERE", "ORDER", "GROUP", "HAVING", "LIMIT", "UNION", "SET", "VALUES":
+      			l_DansClauseFrom    = Faux
+      			l_DoitCapturerTable = Faux
+      	FIN
+      	
+      	SI Majuscule(l_MotCourant) = "FROM" ALORS
+      		l_DansClauseFrom    = Vrai
+      		l_DoitCapturerTable = Vrai
+      		CONTINUER
+      	FIN
+      	
+      	SI Majuscule(l_MotCourant) = "JOIN" ALORS
+      		l_DoitCapturerTable = Vrai
+      		CONTINUER
+      	FIN
+      	
+      	SI l_DansClauseFrom ET l_MotCourant = "," ALORS
+      		l_DoitCapturerTable = Vrai
+      		CONTINUER
+      	FIN
+      	
+      	SI l_DoitCapturerTable ALORS
+      		SELON Majuscule(l_MotCourant)
+      			CAS "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "NATURAL", "JOIN", "ON", "AS", ",":
+      			AUTRE CAS:
+      				l_NomTableExtrait = Minuscule(SansEspace(l_MotCourant))
+      				l_NomTableExtrait = Remplace(l_NomTableExtrait, """", "")
+      				l_NomTableExtrait = Remplace(l_NomTableExtrait, "'", "")
+      				l_NomTableExtrait = Remplace(l_NomTableExtrait, "`", "")
+      				l_NomTableExtrait = Remplace(l_NomTableExtrait, "[", "")
+      				l_NomTableExtrait = Remplace(l_NomTableExtrait, "]", "")
+      				
+      				SI Position(l_NomTableExtrait, ".") > 0 ALORS
+      					l_NomTableExtrait = ExtraitChaîne(l_NomTableExtrait, 2, ".")
+      				FIN
+      				
+      				SI l_NomTableExtrait <> "" ALORS
+      					SI TableauCherche(l_TableauTablesImpactees, tcLinéaire, l_NomTableExtrait) = -1 ALORS
+      						TableauAjoute(l_TableauTablesImpactees, l_NomTableExtrait)
+      					FIN
+      				FIN
+      				l_DoitCapturerTable = Faux
+      		FIN
+      	FIN
+      FIN
+      
+      RENVOYER l_TableauTablesImpactees
+     type : 458752
+   -
+     name : _ObtenirChargeRamActuelle
+     procedure_id : 1920156999033330683
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Interroge le noyau Windows via l'API Win32 pour obtenir le pourcentage d'occupation RAM.
+      /// </summary>
+      PROCÉDURE PRIVÉE _ObtenirChargeRamActuelle() : entier
+      
+      LOCAL
+      	l_StructureMemoire est une STRUCTURE_MEMOIRE_WINDOWS_CACHE
+      
+      l_StructureMemoire.TailleStructure = Dimension(l_StructureMemoire)
+      
+      SI AppelDLL32("kernel32.dll", "GlobalMemoryStatusEx", &l_StructureMemoire) ALORS
+      	RENVOYER l_StructureMemoire.ChargeMemoire
+      SINON
+      	RENVOYER 0
+      FIN
+     type : 458752
+   -
+     name : _PurgerMoinsFrequents
+     procedure_id : 1920156999033330684
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Éviction LFU : supprime un pourcentage des requêtes les moins fréquemment demandées.
+      /// </summary>
+      PROCÉDURE PRIVÉE _PurgerMoinsFrequents(a_PourcentageASupprimer est un entier = 20)
+      
+      LOCAL
+      	l_TableauScores   est un tableau de STEvictionScore
+      	l_ElementScore    est une STEvictionScore
+      	l_CleCourante     est une chaîne
+      	l_TotalElements   est un entier
+      	l_NombreAEliminer est un entier
+      	l_Indice          est un entier
+      
+      l_TotalElements = m_DictionnaireCache..Occurrence
+      SI l_TotalElements = 0 ALORS RETOUR
+      
+      POUR TOUT l_Entree, l_CleCourante DE m_DictionnaireCache
+      	l_ElementScore.m_CleEmpreinte = l_CleCourante
+      	l_ElementScore.m_NombreAcces  = l_Entree.m_NombreAcces
+      	TableauAjoute(l_TableauScores, l_ElementScore)
+      FIN
+      
+      TableauTrie(l_TableauScores, ttMembre, "m_NombreAcces")
+      
+      l_NombreAEliminer = PartieEntière((l_TotalElements * a_PourcentageASupprimer) / 100.0)
+      SI l_NombreAEliminer < 1 ALORS l_NombreAEliminer = 1
+      
+      POUR l_Indice = 1 À Min(l_NombreAEliminer, TableauOccurrence(l_TableauScores))
+      	Supprime(m_DictionnaireCache, l_TableauScores[l_Indice].m_CleEmpreinte)
+      	m_TotalEvictionsRam++
+      FIN
+     type : 458752
+   -
+     name : _EstRequeteVolatile
+     procedure_id : 1920156999033330685
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Détecte si une table subit un ratio d'écritures excessif par rapport à ses lectures.
+      /// </summary>
+      PROCÉDURE PRIVÉE _EstRequeteVolatile(a_TableauTables est un tableau de chaînes) : booléen
+      
+      LOCAL
+      	l_NomTable  est une chaîne
+      	l_Lectures  est un entier sur 8 octets
+      	l_Ecritures est un entier sur 8 octets
+      
+      POUR TOUT l_NomTable DE a_TableauTables
+      	l_NomTable = Minuscule(SansEspace(l_NomTable))
+      	
+      	SI m_CompteurEcrituresParTable[l_NomTable]..Existe ALORS
+      		l_Ecritures = m_CompteurEcrituresParTable[l_NomTable]
+      	SINON
+      		l_Ecritures = 0
+      	FIN
+      	
+      	SI m_CompteurLecturesParTable[l_NomTable]..Existe ALORS
+      		l_Lectures = m_CompteurLecturesParTable[l_NomTable]
+      	SINON
+      		l_Lectures = 0
+      	FIN
+      	
+      	SI l_Ecritures >= 5 ALORS
+      		SI l_Lectures = 0 OU (l_Ecritures * 1.0 / l_Lectures) >= 0.6 ALORS
+      			RENVOYER Vrai
+      		FIN
+      	FIN
+      FIN
+      
+      RENVOYER Faux
+     type : 458752
+   -
+     name : _NettoyerEntreesExpirees
+     procedure_id : 1920156999033330686
+     type_code : 12
+     code : |1+
+      /// <summary>
+      /// Purge interne des entrées dont la date limite TTL est dépassée.
+      /// </summary>
+      PROCÉDURE PRIVÉE _NettoyerEntreesExpirees()
+      
+      LOCAL
+      	l_DateHeureActuelle     est une DateHeure = DateHeureSys()
+      	l_TableauClesASupprimer est un tableau de chaînes
+      	l_CleCourante           est une chaîne
+      	l_IndiceCle             est un entier
+      
+      POUR TOUT l_Entree, l_CleCourante DE m_DictionnaireCache
+      	SI l_Entree.m_DateHeureExpiration <= l_DateHeureActuelle ALORS
+      		TableauAjoute(l_TableauClesASupprimer, l_CleCourante)
+      	FIN
+      FIN
+      
+      POUR l_IndiceCle = 1 À TableauOccurrence(l_TableauClesASupprimer)
+      	Supprime(m_DictionnaireCache, l_TableauClesASupprimer[l_IndiceCle])
+      FIN
+     type : 458752
+  procedure_templates : []
+  property_templates : []
+ code_parameters :
+  internal_properties : BQAAAAUAAAA6ih3UbgNXHwTtiPSFUEj+2fi/m7v4QV2rqidAupM=
+  original_name : Classe1
+resources :
+ string_res :
+  identifier : 0x1aa5c498005781b5
+  internal_properties : BQAAAAUAAAAnMYFQ1bL/vz9ehh7L22SNNSlIzGTOI8h5F/WtgDNP
+custom_note :
+ internal_properties : BQAAAAUAAABtB9HWVzrXO2+4NDRVK0vmzaNKrCKqH1DBX30lMmGZ
