@@ -101,13 +101,33 @@ class :
       
       SELON l_UriDemande
       
-      	// Route 0 : Challenge ACME Let's Encrypt (Priorité absolue pour le SSL)
-      	CAS [= "/.well-known/acme-challenge/"
-      		_TraiterRequeteAcmeChallenge(a_SocketRecu)
-      		
-      	// Route 0.1 : Authentification Login (Délivre le JWT sans vérification préalable)
+      // Route 0.1 : Authentification initiale
+      	// Route publique : aucun JWT n'existe encore à ce stade.
       	CAS [= "/api/v1/auth/login"
+      		
       		_TraiterAuthentificationLogin(a_SocketRecu)
+      		
+      		
+      		// Route 0.2 : Renouvellement silencieux de la session
+      		// Route publique du point de vue de l'Access Token.
+      	// La sécurité repose ici sur le Refresh Token.
+      	CAS [= "/api/v1/auth/refresh"
+      		
+      		_TraiterAuthentificationRefresh(a_SocketRecu)
+      		
+      		
+      		// Route 0.3 : Déconnexion de tous les appareils
+      	// La méthode effectue elle-même la validation complète de l'Access Token.
+      	CAS [= "/api/v1/auth/logout-all"
+      		
+      		_TraiterAuthentificationLogoutAll(a_SocketRecu)
+      		
+      		
+      		// Route 0.4 : Déconnexion de la session courante
+      	// La méthode effectue elle-même la validation complète de l'Access Token.
+      	CAS [= "/api/v1/auth/logout"
+      		
+      		_TraiterAuthentificationLogout(a_SocketRecu)
       		
       	// Route 1 : Supervision Système (Protégée par token ou clé test)
       	CAS [= "/api/v1/monitoring/systeme"
@@ -698,67 +718,806 @@ class :
      type : 458752
    -
      name : _TraiterAuthentificationLogin
-     procedure_id : 1917956996525251992
+     procedure_id : 1923074681990581764
      type_code : 12
-     code : |1+
+     code : |1-
+      // =============================================================================
+      // Méthode : _TraiterAuthentificationLogin
+      // Classe  : CLApplication
+      //
+      // Rôle :
+      //   1. Vérifie le verbe HTTP.
+      //   2. Lit login/password.
+      //   3. Vérifie les identifiants.
+      //   4. Crée une session persistante dans SessionSecurite.
+      //   5. Génère l'Access Token court.
+      //   6. Retourne également le Refresh Token.
+      //
+      // Le mot de passe n'est utilisé qu'à la création d'une nouvelle session.
+      // =============================================================================
+      
       PROCÉDURE PRIVÉE _TraiterAuthentificationLogin(a_SocketRecu est CLCanalSocket)
       
       LOCAL
-      	l_JsonEntrant est un Variant
-      	l_Identifiant est une chaîne = ""
-      	l_MotDePasse  est une chaîne = ""
-      	l_JetonAcces  est une chaîne = ""
-      	l_ReponseJson est un Variant
+      	l_JsonEntrant				est un Variant
+      	
+      	l_Identifiant				est une chaîne	= ""
+      	l_MotDePasse				est une chaîne	= ""
+      	l_NomAppareil				est une chaîne	= ""
+      	
+      	l_IdSession					est une chaîne	= ""
+      	l_RefreshToken				est une chaîne	= ""
+      	l_JetonAcces				est une chaîne	= ""
+      	
+      	l_DureeJetonMinutes			est un entier	= 15
+      	l_DureeJetonSecondes		est un entier	= 900
+      	
+      	l_ReponseJson				est un Variant
+      	
+      	// =============================================================================
+      	// 1. CONTRÔLE DU VERBE HTTP
+      	// =============================================================================
       	
       SI a_SocketRecu.m_TypeRequete <> "POST" ALORS
-      	a_SocketRecu.m_CodeReponse   = "405 Method Not Allowed"
-      	a_SocketRecu.m_extension     = ".json"
-      	a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Méthode POST obligatoire.""}"
+      	
+      	a_SocketRecu.m_CodeReponse		= "405 Method Not Allowed"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Méthode POST obligatoire.""}"
+      	
       	SI m_Journal <> Null ALORS
-      		m_Journal.EnregistrerErreur(ChaîneConstruit("Appel login refusé : Verbe '%1' non autorisé.", a_SocketRecu.m_TypeRequete), a_SocketRecu.m_NomHote, "AVERTISSEMENT")
+      		
+      		m_Journal.EnregistrerErreur(...
+      		ChaîneConstruit(...
+      		"Appel login refusé : Verbe '%1' non autorisé.", ...
+      		a_SocketRecu.m_TypeRequete), ...
+      		a_SocketRecu.m_NomHote, ...
+      		"AVERTISSEMENT")
+      		
       	FIN
+      	
       	RETOUR
+      	
       FIN
+      
+      // =============================================================================
+      // 2. LECTURE DU CORPS JSON
+      // =============================================================================
       
       QUAND EXCEPTION DANS
-      	l_JsonEntrant = JSONVersVariant(a_SocketRecu.m_CorpsRequete)
-      	l_Identifiant = SansEspace(l_JsonEntrant.login)
-      	l_MotDePasse  = l_JsonEntrant.password
+      	
+      	l_JsonEntrant	= JSONVersVariant(a_SocketRecu.m_CorpsRequete)
+      	
+      	l_Identifiant	= SansEspace(l_JsonEntrant.login)
+      	l_MotDePasse	= l_JsonEntrant.password
+      	
       FAIRE
-      	a_SocketRecu.m_CodeReponse   = "400 Bad Request"
-      	a_SocketRecu.m_extension     = ".json"
-      	a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Corps JSON invalide.""}"
+      	
+      	a_SocketRecu.m_CodeReponse		= "400 Bad Request"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Corps JSON invalide.""}"
+      	
       	SI m_Journal <> Null ALORS
-      		m_Journal.EnregistrerErreur("Corps JSON malformé lors de l'authentification.", a_SocketRecu.m_NomHote, "AVERTISSEMENT", ExceptionInfo(errComplet))
+      		
+      		m_Journal.EnregistrerErreur(...
+      		"Corps JSON malformé lors de l'authentification.", ...
+      		a_SocketRecu.m_NomHote, ...
+      		"AVERTISSEMENT", ...
+      		ExceptionInfo(errComplet))
+      		
       	FIN
+      	
       	RETOUR
+      	
       FIN
       
-      SI PAS m_Securite.VerifierIdentifiants(l_Identifiant, l_MotDePasse) ALORS
-      	a_SocketRecu.m_CodeReponse   = "401 Unauthorized"
-      	a_SocketRecu.m_extension     = ".json"
-      	a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Identifiants invalides.""}"
-      	SI m_Journal <> Null ALORS
-      		m_Journal.EnregistrerErreur(ChaîneConstruit("Échec d'authentification pour le compte '%1' depuis l'IP %2.", l_Identifiant, a_SocketRecu.m_AdresseIp), a_SocketRecu.m_NomHote, "SECURITE")
-      	FIN
-      	RETOUR
+      // =============================================================================
+      // 3. NOM DE L'APPAREIL
+      //
+      // Le client peut transmettre :
+      //
+      // {
+      //     "login": "...",
+      //     "password": "...",
+      //     "device_name": "PC Bureau"
+      // }
+      //
+      // Si device_name n'est pas fourni, on utilise le User-Agent.
+      // =============================================================================
+      
+      QUAND EXCEPTION DANS
+      	
+      	l_NomAppareil = SansEspace(l_JsonEntrant.device_name)
+      	
+      FAIRE
+      	
+      	l_NomAppareil = ""
+      	
       FIN
       
-      l_JetonAcces = m_Securite.GenererJeton(l_Identifiant, 120)
+      SI l_NomAppareil = "" ALORS
+      	
+      	l_NomAppareil = Gauche(...
+      	a_SocketRecu.m_UserAgent, ...
+      	255)
+      	
+      FIN
       
-      l_ReponseJson.statut       = "succes"
-      l_ReponseJson.token_type   = "Bearer"
-      l_ReponseJson.access_token = l_JetonAcces
-      l_ReponseJson.expires_in   = 7200
-      l_ReponseJson.utilisateur  = l_Identifiant
+      SI l_NomAppareil = "" ALORS
+      	l_NomAppareil = "Appareil non identifié"
+      FIN
       
-      a_SocketRecu.m_CodeReponse   = "200 OK"
-      a_SocketRecu.m_extension     = ".json"
-      a_SocketRecu.m_ContenuBuffer = VariantVersJSON(l_ReponseJson)
+      // =============================================================================
+      // 4. VALIDATION MINIMALE
+      // =============================================================================
+      
+      SI l_Identifiant = "" OU l_MotDePasse = "" ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "400 Bad Request"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Login et mot de passe obligatoires.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 5. AUTHENTIFICATION
+      // =============================================================================
+      
+      SI PAS m_Securite.VerifierIdentifiants(...
+      	l_Identifiant, ...
+      	l_MotDePasse) ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Identifiants invalides ou compte désactivé.""}"
+      	
+      	SI m_Journal <> Null ALORS
+      		
+      		m_Journal.EnregistrerErreur(...
+      		ChaîneConstruit(...
+      		"Échec d'authentification pour le compte '%1' depuis l'IP %2.", ...
+      		l_Identifiant, ...
+      		a_SocketRecu.m_AdresseIp), ...
+      		a_SocketRecu.m_NomHote, ...
+      		"SECURITE")
+      		
+      	FIN
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 6. CRÉATION DE LA SESSION PERSISTANTE
+      // =============================================================================
+      
+      SI PAS m_Securite.CreerSession(...
+      	l_Identifiant, ...
+      	a_SocketRecu.m_AdresseIp, ...
+      	a_SocketRecu.m_UserAgent, ...
+      	l_NomAppareil, ...
+      	l_IdSession, ...
+      	l_RefreshToken) ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Impossible de créer la session utilisateur.""}"
+      	
+      	SI m_Journal <> Null ALORS
+      		
+      		m_Journal.EnregistrerErreur(...
+      		ChaîneConstruit(...
+      		"Échec de création de session après authentification de '%1'.", ...
+      		l_Identifiant), ...
+      		a_SocketRecu.m_NomHote, ...
+      		"CRITIQUE")
+      		
+      	FIN
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 7. GÉNÉRATION DE L'ACCESS TOKEN COURT
+      // =============================================================================
+      
+      l_JetonAcces = m_Securite.GenererJeton(...
+      l_Identifiant, ...
+      l_IdSession)
+      
+      // Récupération de la durée configurée pour que la réponse HTTP corresponde
+      // exactement à la configuration de CLSecurite.
+      l_DureeJetonMinutes = Val(...
+      m_Configuration.LireParametreSecurite(...
+      "DureeJetonAccesMinutes", ...
+      "15"))
+      
+      SI l_DureeJetonMinutes <= 0 ALORS
+      	l_DureeJetonMinutes = 15
+      FIN
+      
+      l_DureeJetonSecondes			= l_DureeJetonMinutes * 60
+      
+      // =============================================================================
+      // 8. CONSTRUCTION DE LA RÉPONSE
+      // =============================================================================
+      
+      l_ReponseJson.statut			= "succes"
+      
+      l_ReponseJson.token_type		= "Bearer"
+      
+      l_ReponseJson.access_token		= l_JetonAcces
+      l_ReponseJson.expires_in		= l_DureeJetonSecondes
+      
+      l_ReponseJson.refresh_token		= l_RefreshToken
+      
+      l_ReponseJson.session_id		= l_IdSession
+      
+      l_ReponseJson.utilisateur		= l_Identifiant
+      
+      // =============================================================================
+      // 9. RÉPONSE HTTP
+      // =============================================================================
+      
+      a_SocketRecu.m_CodeReponse		= "200 OK"
+      a_SocketRecu.m_extension		= ".json"
+      a_SocketRecu.m_ContenuBuffer	= VariantVersJSON(l_ReponseJson)
+      
+      // =============================================================================
+      // 10. JOURNALISATION
+      // =============================================================================
       
       SI m_Journal <> Null ALORS
-      	m_Journal.EnregistrerErreur(ChaîneConstruit("Authentification réussie pour l'utilisateur '%1'.", l_Identifiant), a_SocketRecu.m_NomHote, "INFO")
+      	
+      	m_Journal.EnregistrerErreur(...
+      	ChaîneConstruit(...
+      	"Authentification réussie pour '%1'. Session créée : %2 [IP: %3].", ...
+      	l_Identifiant, ...
+      	l_IdSession, ...
+      	a_SocketRecu.m_AdresseIp), ...
+      	a_SocketRecu.m_NomHote, ...
+      	"INFO")
+      	
       FIN
+     type : 458752
+   -
+     name : _ExtraireJetonBearer
+     procedure_id : 1923073268946273633
+     type_code : 12
+     code : |1+
+      
+      
+      // =============================================================================
+      // Méthode : _ExtraireJetonBearer
+      // Classe  : CLApplication
+      //
+      // Rôle :
+      // Extrait exclusivement l'Access Token présent dans :
+      //
+      //     Authorization: Bearer <TOKEN>
+      //
+      // Aucun token transmis dans l'URL n'est accepté.
+      // =============================================================================
+      PROCÉDURE PRIVÉE _ExtraireJetonBearer(a_SocketRecu est CLCanalSocket) : chaîne
+      
+      LOCAL
+      	l_EnteteAuthorization	est une chaîne	= ""
+      	l_Jeton					est une chaîne	= ""
+      	
+      	// =============================================================================
+      	// 1. LECTURE DE L'EN-TÊTE AUTHORIZATION
+      	// =============================================================================
+      	
+      SI a_SocketRecu.m_Parametres["Authorization"]..Existe ALORS
+      	l_EnteteAuthorization = SansEspace(a_SocketRecu.m_Parametres["Authorization"])
+      FIN
+      
+      SI l_EnteteAuthorization = "" ALORS
+      	RENVOYER ""
+      FIN
+      
+      // =============================================================================
+      // 2. CONTRÔLE DU SCHÉMA BEARER
+      // =============================================================================
+      
+      SI Position(l_EnteteAuthorization, "Bearer ", 1, SansCasse) <> 1 ALORS
+      	RENVOYER ""
+      FIN
+      
+      // =============================================================================
+      // 3. EXTRACTION DU TOKEN
+      // =============================================================================
+      
+      l_Jeton = SansEspace(...
+      Remplace(...
+      l_EnteteAuthorization, ...
+      "Bearer ", ...
+      "", ...
+      SansCasse))
+      
+      RENVOYER l_Jeton
+      
+     type : 458752
+   -
+     name : _TraiterAuthentificationRefresh
+     procedure_id : 1923074909623901202
+     type_code : 12
+     code : |1+
+      
+      
+      
+      // =============================================================================
+      // Méthode : _TraiterAuthentificationRefresh
+      // Classe  : CLApplication
+      //
+      // Rôle :
+      // Renouvelle silencieusement une session existante.
+      //
+      // Entrée :
+      // {
+      //     "refresh_token": "..."
+      // }
+      //
+      // Sortie :
+      // {
+      //     "access_token": "...",
+      //     "refresh_token": "..."
+      // }
+      //
+      // IMPORTANT :
+      // Le Refresh Token est renouvelé à chaque appel.
+      // L'ancien Refresh Token ne doit plus être utilisé ensuite.
+      // =============================================================================
+      PROCÉDURE PRIVÉE _TraiterAuthentificationRefresh(a_SocketRecu est CLCanalSocket)
+      
+      LOCAL
+      	l_JsonEntrant				est un Variant
+      	
+      	l_RefreshToken				est une chaîne	= ""
+      	
+      	l_NouveauJetonAcces			est une chaîne	= ""
+      	l_NouveauRefreshToken		est une chaîne	= ""
+      	
+      	l_Utilisateur				est une chaîne	= ""
+      	
+      	l_DureeSecondes				est un entier	= 0
+      	
+      	l_ReponseJson				est un Variant
+      	
+      	// =============================================================================
+      	// 1. CONTRÔLE DU VERBE HTTP
+      	// =============================================================================
+      	
+      SI a_SocketRecu.m_TypeRequete <> "POST" ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "405 Method Not Allowed"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Méthode POST obligatoire.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 2. LECTURE DU REFRESH TOKEN
+      // =============================================================================
+      
+      QUAND EXCEPTION DANS
+      	
+      	l_JsonEntrant	= JSONVersVariant(a_SocketRecu.m_CorpsRequete)
+      	
+      	l_RefreshToken	= SansEspace(l_JsonEntrant.refresh_token)
+      	
+      FAIRE
+      	
+      	a_SocketRecu.m_CodeReponse		= "400 Bad Request"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Corps JSON invalide.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      SI l_RefreshToken = "" ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "400 Bad Request"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Refresh Token obligatoire.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 3. RENOUVELLEMENT DE LA SESSION
+      // =============================================================================
+      
+      SI PAS m_Securite.RenouvelerSession(...
+      	l_RefreshToken, ...
+      	a_SocketRecu.m_AdresseIp, ...
+      	a_SocketRecu.m_UserAgent, ...
+      	l_NouveauJetonAcces, ...
+      	l_NouveauRefreshToken, ...
+      	l_Utilisateur, ...
+      	l_DureeSecondes) ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Session expirée, révoquée ou Refresh Token invalide.""}"
+      	
+      	SI m_Journal <> Null ALORS
+      		
+      		m_Journal.EnregistrerErreur(...
+      		ChaîneConstruit(...
+      		"Tentative de renouvellement de session refusée depuis l'IP %1.", ...
+      		a_SocketRecu.m_AdresseIp), ...
+      		a_SocketRecu.m_NomHote, ...
+      		"SECURITE")
+      		
+      	FIN
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 4. CONSTRUCTION DE LA NOUVELLE PAIRE DE TOKENS
+      // =============================================================================
+      
+      l_ReponseJson.statut			= "succes"
+      
+      l_ReponseJson.token_type		= "Bearer"
+      
+      l_ReponseJson.access_token		= l_NouveauJetonAcces
+      l_ReponseJson.expires_in		= l_DureeSecondes
+      
+      l_ReponseJson.refresh_token		= l_NouveauRefreshToken
+      
+      l_ReponseJson.utilisateur		= l_Utilisateur
+      
+      // =============================================================================
+      // 5. RÉPONSE HTTP
+      // =============================================================================
+      
+      a_SocketRecu.m_CodeReponse		= "200 OK"
+      a_SocketRecu.m_extension		= ".json"
+      a_SocketRecu.m_ContenuBuffer	= VariantVersJSON(l_ReponseJson)
+      
+      // =============================================================================
+      // 6. JOURNALISATION
+      // =============================================================================
+      
+      SI m_Journal <> Null ALORS
+      	
+      	m_Journal.EnregistrerErreur(...
+      	ChaîneConstruit(...
+      	"Renouvellement automatique de session réussi pour '%1' [IP: %2].", ...
+      	l_Utilisateur, ...
+      	a_SocketRecu.m_AdresseIp), ...
+      	a_SocketRecu.m_NomHote, ...
+      	"INFO")
+      	
+      FIN
+      
+     type : 458752
+   -
+     name : _TraiterAuthentificationLogout
+     procedure_id : 1923075012703205982
+     type_code : 12
+     code : |1+
+      
+      
+      
+      // =============================================================================
+      // Méthode : _TraiterAuthentificationLogout
+      // Classe  : CLApplication
+      //
+      // Rôle :
+      // Déconnecte uniquement la session correspondant à l'Access Token reçu.
+      //
+      // Authorization:
+      //     Bearer <ACCESS_TOKEN>
+      // =============================================================================
+      PROCÉDURE PRIVÉE _TraiterAuthentificationLogout(a_SocketRecu est CLCanalSocket)
+      
+      LOCAL
+      	l_JetonAcces			est une chaîne	= ""
+      	l_JsonPayload			est une chaîne	= ""
+      	
+      	l_PayloadVariant		est un Variant
+      	
+      	l_IdSession				est une chaîne	= ""
+      	l_Utilisateur			est une chaîne	= ""
+      	
+      	// =============================================================================
+      	// 1. CONTRÔLE DU VERBE HTTP
+      	// =============================================================================
+      	
+      SI a_SocketRecu.m_TypeRequete <> "POST" ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "405 Method Not Allowed"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Méthode POST obligatoire.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 2. EXTRACTION DU TOKEN
+      // =============================================================================
+      
+      l_JetonAcces = _ExtraireJetonBearer(a_SocketRecu)
+      
+      SI l_JetonAcces = "" ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Access Token absent.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 3. VALIDATION DU TOKEN ET DE LA SESSION
+      // =============================================================================
+      
+      SI PAS m_Securite.ValiderJeton(...
+      	l_JetonAcces, ...
+      	l_JsonPayload, ...
+      	a_SocketRecu.m_AdresseIp, ...
+      	a_SocketRecu.m_UserAgent) ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Session invalide ou déjà expirée.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 4. EXTRACTION DU SID ET DE L'UTILISATEUR
+      // =============================================================================
+      
+      QUAND EXCEPTION DANS
+      	
+      	l_PayloadVariant	= JSONVersVariant(l_JsonPayload)
+      	
+      	l_IdSession			= "" + l_PayloadVariant.sid
+      	l_Utilisateur		= "" + l_PayloadVariant.sub
+      	
+      FAIRE
+      	
+      	a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Payload JWT invalide.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      SI l_IdSession = "" ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Identifiant de session absent.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 5. RÉVOCATION DE LA SESSION
+      // =============================================================================
+      
+      SI PAS m_Securite.RevoquerSession(...
+      	l_IdSession, ...
+      	"Déconnexion volontaire de l'utilisateur") ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Impossible de fermer la session.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 6. RÉPONSE
+      // =============================================================================
+      
+      a_SocketRecu.m_CodeReponse		= "200 OK"
+      a_SocketRecu.m_extension		= ".json"
+      a_SocketRecu.m_ContenuBuffer	= ...
+      "{""statut"": ""succes"", ""message"": ""Session déconnectée avec succès.""}"
+      
+      // =============================================================================
+      // 7. JOURNALISATION
+      // =============================================================================
+      
+      SI m_Journal <> Null ALORS
+      	
+      	m_Journal.EnregistrerErreur(...
+      	ChaîneConstruit(...
+      	"Déconnexion de '%1' [Session: %2 / IP: %3].", ...
+      	l_Utilisateur, ...
+      	l_IdSession, ...
+      	a_SocketRecu.m_AdresseIp), ...
+      	a_SocketRecu.m_NomHote, ...
+      	"INFO")
+      	
+      FIN
+      
+     type : 458752
+   -
+     name : _TraiterAuthentificationLogoutAll
+     procedure_id : 1923075120077412773
+     type_code : 12
+     code : |1+
+      
+      
+      
+      // =============================================================================
+      // Méthode : _TraiterAuthentificationLogoutAll
+      // Classe  : CLApplication
+      //
+      // Rôle :
+      // Révoque toutes les sessions de l'utilisateur identifié par l'Access Token.
+      // =============================================================================
+      PROCÉDURE PRIVÉE _TraiterAuthentificationLogoutAll(a_SocketRecu est CLCanalSocket)
+      
+      LOCAL
+      	l_JetonAcces		est une chaîne	= ""
+      	l_JsonPayload		est une chaîne	= ""
+      	
+      	l_PayloadVariant	est un Variant
+      	
+      	l_Utilisateur		est une chaîne	= ""
+      	
+      	// =============================================================================
+      	// 1. CONTRÔLE DU VERBE HTTP
+      	// =============================================================================
+      	
+      SI a_SocketRecu.m_TypeRequete <> "POST" ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "405 Method Not Allowed"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Méthode POST obligatoire.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 2. ACCESS TOKEN
+      // =============================================================================
+      
+      l_JetonAcces = _ExtraireJetonBearer(a_SocketRecu)
+      
+      SI l_JetonAcces = "" ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Access Token absent.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 3. VALIDATION DU TOKEN
+      // =============================================================================
+      
+      SI PAS m_Securite.ValiderJeton(...
+      	l_JetonAcces, ...
+      	l_JsonPayload, ...
+      	a_SocketRecu.m_AdresseIp, ...
+      	a_SocketRecu.m_UserAgent) ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Session invalide.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 4. IDENTIFICATION DE L'UTILISATEUR
+      // =============================================================================
+      
+      QUAND EXCEPTION DANS
+      	
+      	l_PayloadVariant	= JSONVersVariant(l_JsonPayload)
+      	
+      	l_Utilisateur		= "" + l_PayloadVariant.sub
+      	
+      FAIRE
+      	
+      	a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Payload JWT invalide.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      SI l_Utilisateur = "" ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Utilisateur absent du JWT.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 5. RÉVOCATION DE TOUTES LES SESSIONS
+      // =============================================================================
+      
+      SI PAS m_Securite.RevoquerToutesSessionsUtilisateur(...
+      	l_Utilisateur, ...
+      	"Déconnexion globale demandée par l'utilisateur") ALORS
+      	
+      	a_SocketRecu.m_CodeReponse		= "500 Internal Server Error"
+      	a_SocketRecu.m_extension		= ".json"
+      	a_SocketRecu.m_ContenuBuffer	= ...
+      	"{""erreur"": ""Impossible de révoquer les sessions.""}"
+      	
+      	RETOUR
+      	
+      FIN
+      
+      // =============================================================================
+      // 6. RÉPONSE
+      // =============================================================================
+      
+      a_SocketRecu.m_CodeReponse		= "200 OK"
+      a_SocketRecu.m_extension		= ".json"
+      a_SocketRecu.m_ContenuBuffer	= ...
+      "{""statut"": ""succes"", ""message"": ""Toutes les sessions ont été déconnectées.""}"
+      
+      // =============================================================================
+      // 7. JOURNALISATION
+      // =============================================================================
+      
+      SI m_Journal <> Null ALORS
+      	
+      	m_Journal.EnregistrerErreur(...
+      	ChaîneConstruit(...
+      	"Déconnexion globale effectuée pour '%1' depuis l'IP %2.", ...
+      	l_Utilisateur, ...
+      	a_SocketRecu.m_AdresseIp), ...
+      	a_SocketRecu.m_NomHote, ...
+      	"SECURITE")
+      	
+      FIN
+      
      type : 458752
   procedure_templates : []
   property_templates : []

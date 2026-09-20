@@ -34,7 +34,26 @@ class :
       	// Mode Test / Développement
       	m_ModeTestActif			est un booléen
       	m_CleTest				est une chaîne
+      	// =============================================================================
+      	// GESTION DES SESSIONS D'AUTHENTIFICATION
+      	// =============================================================================
       	
+      	// Table centrale contenant les sessions persistantes des utilisateurs.
+      	// Aucun JWT ou Refresh Token n'est enregistré en clair dans cette table.
+      	m_NomTableSessions				est une chaîne
+      	
+      	// Rubrique permettant d'autoriser ou de bloquer globalement un utilisateur.
+      	m_RubriqueActifUtilisateur		est une chaîne
+      	
+      	// Durée très courte du JWT d'accès.
+      	// Le renouvellement est transparent pour l'utilisateur via le Refresh Token.
+      	m_DureeJetonAccesMinutes		est un entier
+      	
+      	// Durée maximale sans activité avant expiration automatique de la session.
+      	m_DureeSessionInactiviteJours	est un entier
+      	
+      	// Durée maximale absolue d'une session, même si l'utilisateur reste actif.
+      	m_DureeSessionAbsolueJours		est un entier
       FIN
      type : 131072
   procedures :
@@ -43,23 +62,67 @@ class :
      procedure_id : 1917769508316104333
      type_code : 27
      code : |1-
-      procédure Constructeur(a_Configuration est un CLConfiguration dynamique, a_Base est un CLBase dynamique, a_Journal est un CLJournalisation dynamique)
+      PROCÉDURE Constructeur(a_Configuration est un CLConfiguration dynamique, a_Base est un CLBase dynamique, a_Journal est un CLJournalisation dynamique)
       
-      m_Configuration			= a_Configuration
-      m_Base					= a_Base
-      m_Journal				= a_Journal
+      m_Configuration					= a_Configuration
+      m_Base							= a_Base
+      m_Journal						= a_Journal
       
-      // Récupération des clés dynamiques configurées
-      m_NomTableUtilisateurs	= m_Configuration.LireParametreSecurite("TableUtilisateurs", "utilisateur")
-      m_RubriqueLogin			= m_Configuration.LireParametreSecurite("RubriqueLogin", "login")
-      m_RubriqueMotDePasse	= m_Configuration.LireParametreSecurite("RubriqueMotDePasse", "mot_de_passe")
-      m_TypeHachage			= Majuscule(m_Configuration.LireParametreSecurite("TypeHachage", "SHA256"))
-      m_CleSecreteJwt			= m_Configuration.LireParametreSecurite("CleSecreteJwt", "RaaD_Secret_Cle_Defaut_2026")
-      m_SelSecurite			= m_Configuration.LireParametreSecurite("SelSecurite", "Sel_Securite_RaaD")
+      // =============================================================================
+      // 1. CONFIGURATION DU RÉFÉRENTIEL UTILISATEURS
+      // =============================================================================
       
-      // Mode de test et clé de contournement
-      m_ModeTestActif			= (m_Configuration.LireParametreSecurite("ModeTest", "0") = "1")
-      m_CleTest				= m_Configuration.LireParametreSecurite("CleTest", "")
+      m_NomTableUtilisateurs			= m_Configuration.LireParametreSecurite("TableUtilisateurs", "utilisateur")
+      m_RubriqueLogin					= m_Configuration.LireParametreSecurite("RubriqueLogin", "login")
+      m_RubriqueMotDePasse			= m_Configuration.LireParametreSecurite("RubriqueMotDePasse", "mot_de_passe")
+      m_RubriqueActifUtilisateur		= m_Configuration.LireParametreSecurite("RubriqueActif", "actif")
+      
+      // =============================================================================
+      // 2. CONFIGURATION DE LA TABLE DES SESSIONS
+      // =============================================================================
+      
+      m_NomTableSessions				= m_Configuration.LireParametreSecurite("TableSessions", "SessionSecurite")
+      
+      // =============================================================================
+      // 3. PARAMÈTRES CRYPTOGRAPHIQUES
+      // =============================================================================
+      
+      m_TypeHachage					= Majuscule(m_Configuration.LireParametreSecurite("TypeHachage", "SHA256"))
+      m_CleSecreteJwt					= m_Configuration.LireParametreSecurite("CleSecreteJwt", "")
+      m_SelSecurite					= m_Configuration.LireParametreSecurite("SelSecurite", "Sel_Securite_RaaD")
+      
+      // =============================================================================
+      // 4. DURÉE DE VIE DES JETONS ET SESSIONS
+      // =============================================================================
+      
+      // Access Token court : renouvelé automatiquement par l'application.
+      m_DureeJetonAccesMinutes		= Val(m_Configuration.LireParametreSecurite("DureeJetonAccesMinutes", "15"))
+      
+      // Session détruite après cette durée d'inactivité.
+      m_DureeSessionInactiviteJours	= Val(m_Configuration.LireParametreSecurite("DureeSessionInactiviteJours", "30"))
+      
+      // Même si l'utilisateur reste actif, une reconnexion complète sera finalement exigée.
+      m_DureeSessionAbsolueJours		= Val(m_Configuration.LireParametreSecurite("DureeSessionAbsolueJours", "180"))
+      
+      // Sécurisation contre une configuration incorrecte.
+      SI m_DureeJetonAccesMinutes <= 0 ALORS
+      	m_DureeJetonAccesMinutes = 15
+      FIN
+      
+      SI m_DureeSessionInactiviteJours <= 0 ALORS
+      	m_DureeSessionInactiviteJours = 30
+      FIN
+      
+      SI m_DureeSessionAbsolueJours <= 0 ALORS
+      	m_DureeSessionAbsolueJours = 180
+      FIN
+      
+      // =============================================================================
+      // 5. MODE TEST / DÉVELOPPEMENT
+      // =============================================================================
+      
+      m_ModeTestActif	= (m_Configuration.LireParametreSecurite("ModeTest", "0") = "1")
+      m_CleTest		= m_Configuration.LireParametreSecurite("CleTest", "")
      type : 589824
    -
      name : Destructeur
@@ -132,16 +195,19 @@ class :
      type : 458752
    -
      name : VerifierIdentifiants
-     procedure_id : 1917953564846042709
+     procedure_id : 1923061947411615474
      type_code : 12
-     code : |1+
-      // ==============================================================================
+     code : |1-
+      
+      // =============================================================================
       // Méthode : VerifierIdentifiants
       // Classe  : CLSecurite
-      // Rôle    : Authentification unitaire via la méthode Charger(valkey, condition)
-      //           de l'ORM CLEnregistrement et lecture directe de l'objet JSON unique
-      // Version : WinDev 25 Strict
-      // ==============================================================================
+      //
+      // Rôle :
+      //   1. Recherche l'utilisateur.
+      //   2. Vérifie que le compte est actif.
+      //   3. Vérifie le mot de passe.
+      // =============================================================================
       PROCÉDURE VerifierIdentifiants(a_Login est une chaîne, a_MotDePasseEnClair est une chaîne) : booléen
       
       LOCAL
@@ -151,71 +217,123 @@ class :
       	l_JsonResultat			est une chaîne	= ""
       	l_DonneesVariant		est un Variant
       	l_MotDePasseStocke		est une chaîne	= ""
+      	l_UtilisateurActif		est un booléen	= Faux
       	l_Authentifie			est un booléen	= Faux
       	
-      // ------------------------------------------------------------------------------
-      // 1. CONTRÔLE DU RÉFÉRENTIEL ORM (m_Base.m_Table)
-      // ------------------------------------------------------------------------------
+      	// ------------------------------------------------------------------------------
+      	// 1. CONTRÔLE DU RÉFÉRENTIEL ORM
+      	// ------------------------------------------------------------------------------
+      	
       SI PAS m_Base.m_Table[m_NomTableUtilisateurs]..Existe ALORS
-      	_Journaliser(ChaîneConstruit("Table '%1' introuvable dans le référentiel m_Base.m_Table.", m_NomTableUtilisateurs), "CRITIQUE")
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Table '%1' introuvable.", m_NomTableUtilisateurs), ...
+      	"CRITIQUE")
+      	
       	RENVOYER Faux
+      	
       FIN
       
       // ------------------------------------------------------------------------------
-      // 2. INSTANCIATION DYNAMIQUE (ISOLATION STRICTE MULTITHREAD)
+      // 2. INSTANCE ORM ISOLÉE
       // ------------------------------------------------------------------------------
+      
       l_EnregistrementCourant = allouer un CLEnregistrement()
+      
       l_EnregistrementCourant <= m_Base.m_Table[m_NomTableUtilisateurs]
       
       // ------------------------------------------------------------------------------
-      // 3. PRÉPARATION DU FILTRE SQL ET HACHAGE DU MOT DE PASSE REÇU
+      // 3. RECHERCHE DE L'UTILISATEUR
       // ------------------------------------------------------------------------------
-      // Échappement des apostrophes pour neutraliser toute injection SQL
-      l_ConditionRecherche				= ChaîneConstruit("%1 = '%2'", m_RubriqueLogin, Remplace(a_Login, "'", "''"))
       
-      // Hachage du mot de passe saisi avec le sel configuré
-      l_EmpreintePasse					= HacherMotDePasse(a_MotDePasseEnClair)
+      l_ConditionRecherche = ChaîneConstruit(...
+      "%1 = '%2'", ...
+      m_RubriqueLogin, ...
+      Remplace(a_Login, "'", "''"))
+      
+      l_EmpreintePasse = HacherMotDePasse(a_MotDePasseEnClair)
       
       // ------------------------------------------------------------------------------
-      // 4. APPEL DE Charger() ET LECTURE DIRECTE DE L'OBJET JSON UNIQUE
+      // 4. LECTURE DIRECTE DE LA BASE
       // ------------------------------------------------------------------------------
+      
       QUAND EXCEPTION DANS
-      	// Exécution du SELECT unitaire via la condition WHERE
-      	l_EnregistrementCourant.Charger("", l_ConditionRecherche)
       	
-      	// Lecture du résultat sérialisé dans m_json
+      	// Important : pas de cache pour une authentification.
+      	l_EnregistrementCourant.Charger("", l_ConditionRecherche, Vrai)
+      	
       	l_JsonResultat = SansEspace(l_EnregistrementCourant.m_json)
       	
-      	// Contrôle de présence effective d'un objet JSON
-      	SI l_JsonResultat <> "" ET l_JsonResultat <> "{}" ET l_JsonResultat <> "null" ALORS
+      	SI l_JsonResultat <> "" ET ...
+      		l_JsonResultat <> "{}" ET ...
+      		l_JsonResultat <> "null" ALORS
+      		
       		l_DonneesVariant = JSONVersVariant(l_JsonResultat)
       		
-      		// Accès direct sans parcours de collection
-      		SI l_DonneesVariant[m_RubriqueMotDePasse] <> Null ALORS
-      			l_MotDePasseStocke = "" + l_DonneesVariant[m_RubriqueMotDePasse]
+      		// ----------------------------------------------------------------------
+      		// 5. CONTRÔLE DU STATUT DU COMPTE
+      		// ----------------------------------------------------------------------
+      		
+      		SI l_DonneesVariant[m_RubriqueActifUtilisateur] <> Null ALORS
+      			l_UtilisateurActif = (Val(l_DonneesVariant[m_RubriqueActifUtilisateur]) = 1)
       		FIN
       		
-      		// ----------------------------------------------------------------------
-      		// 5. VALIDATION DE L'EMPREINTE
-      		// ----------------------------------------------------------------------
-      		SI l_MotDePasseStocke <> "" ET l_MotDePasseStocke = l_EmpreintePasse ALORS
-      			l_Authentifie = Vrai
+      		SI PAS l_UtilisateurActif ALORS
+      			
+      			_Journaliser(...
+      			ChaîneConstruit("Authentification refusée : compte '%1' désactivé.", a_Login), ...
+      			"SECURITE")
+      			
+      		SINON
+      			
+      			SI l_DonneesVariant[m_RubriqueMotDePasse] <> Null ALORS
+      				l_MotDePasseStocke = "" + l_DonneesVariant[m_RubriqueMotDePasse]
+      			FIN
+      			
+      			// ------------------------------------------------------------------
+      			// 6. VALIDATION DU MOT DE PASSE
+      			// ------------------------------------------------------------------
+      			
+      			SI l_MotDePasseStocke <> "" ET ...
+      				l_MotDePasseStocke	= l_EmpreintePasse ALORS
+      				
+      				l_Authentifie		= Vrai
+      				
+      			FIN
+      			
       		FIN
+      		
       	FIN
+      	
       FAIRE
-      	_Journaliser(ChaîneConstruit("Exception lors du chargement de l'utilisateur '%1'.", a_Login), "CRITIQUE", ExceptionInfo(errComplet))
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Exception lors du chargement de l'utilisateur '%1'.", a_Login), ...
+      	"CRITIQUE", ...
+      	ExceptionInfo(errComplet))
+      	
       	l_Authentifie = Faux
+      	
       FIN
       
       // ------------------------------------------------------------------------------
-      // 6. LIBÉRATION MÉMOIRE OBLIGATOIRE DU CLONE ORM
+      // 7. LIBÉRATION
       // ------------------------------------------------------------------------------
+      
       libérer l_EnregistrementCourant
       
       SI PAS l_Authentifie ALORS
-      	_Journaliser(ChaîneConstruit("Tentative de connexion refusée : identifiants erronés pour le compte '%1'.", a_Login), "SECURITE")
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Tentative de connexion refusée pour '%1'.", a_Login), ...
+      	"SECURITE")
+      	
       SINON
-      	_Journaliser(ChaîneConstruit("Authentification validée avec succès pour le compte '%1'.", a_Login), "INFO")
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Authentification validée pour '%1'.", a_Login), ...
+      	"INFO")
+      	
       FIN
       
       RENVOYER l_Authentifie
@@ -225,158 +343,445 @@ class :
      procedure_id : 1917953667925281860
      type_code : 12
      code : |1+
-      /// <summary>
-      /// Génère un jeton JWT HMAC-SHA256 (compatibilité buffer / chaîne résolue).
-      /// </summary>
-      PROCÉDURE GenererJeton(a_IdentifiantUtilisateur est une chaîne, a_DureeMinutes est un entier = 120) : chaîne
+      
+      
+      
+      // =============================================================================
+      // Méthode : GenererJeton
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Génère un Access Token JWT court associé à une session persistante.
+      //
+      // Claims :
+      //   sub = utilisateur
+      //   sid = session
+      //   jti = identifiant unique du JWT
+      //   iat = date de génération
+      //   exp = date expiration
+      //   token_type = access
+      // =============================================================================
+      PROCÉDURE GenererJeton(...
+      a_IdentifiantUtilisateur	est une chaîne, ...
+      a_IdSession					est une chaîne, ...
+      a_DureeMinutes				est un entier	= 0) : chaîne
       
       LOCAL
       	l_EnteteVariant			est un Variant
       	l_ChargeUtileVariant	est un Variant
+      	
       	l_JsonEntete			est une chaîne
       	l_JsonChargeUtile		est une chaîne
+      	
       	l_EnteteBase64			est une chaîne
       	l_ChargeUtileBase64		est une chaîne
+      	
       	l_DonneesASigner		est une chaîne
+      	
       	l_SignatureBuffer		est un buffer
       	l_SignatureBase64		est une chaîne
-      	l_DateExpiration		est une DateHeure
-      	l_TimestampExpiration	est un entier
       	
-      // 1. En-tête standardisé
-      l_EnteteVariant.alg			= "HS256"
-      l_EnteteVariant.typ			= "JWT"
-      l_JsonEntete				= VariantVersJSON(l_EnteteVariant)
+      	l_DateCreation			est une DateHeure
+      	l_DateExpiration		est une DateHeure
+      	
+      	l_TimestampCreation		est un entier sur 8 octets
+      	l_TimestampExpiration	est un entier sur 8 octets
+      	
+      	l_Jti					est une chaîne
+      	
+      	// =============================================================================
+      	// 1. DURÉE DU JETON
+      	// =============================================================================
+      	
+      SI a_DureeMinutes <= 0 ALORS
+      	a_DureeMinutes = m_DureeJetonAccesMinutes
+      FIN
       
-      // 2. Charge utile avec horodatage d'expiration
-      l_ChargeUtileVariant.sub	= a_IdentifiantUtilisateur
+      // =============================================================================
+      // 2. EN-TÊTE JWT
+      // =============================================================================
       
-      l_DateExpiration			= DateHeureSys()
+      l_EnteteVariant.alg	= "HS256"
+      l_EnteteVariant.typ	= "JWT"
+      
+      l_JsonEntete		= VariantVersJSON(l_EnteteVariant)
+      
+      // =============================================================================
+      // 3. PAYLOAD
+      // =============================================================================
+      
+      l_DateCreation		= DateHeureSys()
+      
+      l_DateExpiration	= l_DateCreation
       l_DateExpiration..Minute += a_DureeMinutes
-      l_TimestampExpiration		= DateHeureVersEpoch(l_DateExpiration)
-      l_ChargeUtileVariant.exp	= l_TimestampExpiration
       
-      l_JsonChargeUtile			= VariantVersJSON(l_ChargeUtileVariant)
+      l_TimestampCreation				= DateHeureVersEpoch(l_DateCreation)
+      l_TimestampExpiration			= DateHeureVersEpoch(l_DateExpiration)
       
-      // 3. Encodage Base64Url (accepte chaîne ou buffer sans erreur de conversion)
-      l_EnteteBase64				= _EncoderBase64Url(l_JsonEntete)
-      l_ChargeUtileBase64			= _EncoderBase64Url(l_JsonChargeUtile)
+      l_Jti							= DonneGUID(guidBrut)
       
-      // 4. Scellement cryptographique HMAC-SHA256
-      l_DonneesASigner			= l_EnteteBase64 + "." + l_ChargeUtileBase64
-      l_SignatureBuffer			= HashChaîne(HA_HMAC_SHA_256, l_DonneesASigner, m_CleSecreteJwt)
-      l_SignatureBase64			= _EncoderBase64Url(l_SignatureBuffer)
+      l_ChargeUtileVariant.sub		= a_IdentifiantUtilisateur
+      l_ChargeUtileVariant.sid		= a_IdSession
+      l_ChargeUtileVariant.jti		= l_Jti
+      
+      l_ChargeUtileVariant.iat		= l_TimestampCreation
+      l_ChargeUtileVariant.exp		= l_TimestampExpiration
+      
+      l_ChargeUtileVariant.token_type	= "access"
+      
+      l_JsonChargeUtile				= VariantVersJSON(l_ChargeUtileVariant)
+      
+      // =============================================================================
+      // 4. ENCODAGE BASE64 URL
+      // =============================================================================
+      
+      l_EnteteBase64					= _EncoderBase64Url(l_JsonEntete)
+      l_ChargeUtileBase64				= _EncoderBase64Url(l_JsonChargeUtile)
+      
+      // =============================================================================
+      // 5. SIGNATURE
+      // =============================================================================
+      
+      l_DonneesASigner				= l_EnteteBase64 + "." + l_ChargeUtileBase64
+      
+      l_SignatureBuffer				= HashChaîne(...
+      HA_HMAC_SHA_256, ...
+      l_DonneesASigner, ...
+      m_CleSecreteJwt)
+      
+      l_SignatureBase64 = _EncoderBase64Url(l_SignatureBuffer)
+      
+      // =============================================================================
+      // 6. JWT FINAL
+      // =============================================================================
       
       RENVOYER l_DonneesASigner + "." + l_SignatureBase64
      type : 458752
    -
      name : ValiderJeton
-     procedure_id : 1917953758119681158
+     procedure_id : 1923063858672310649
      type_code : 12
-     code : |1-
-      /// <summary>
-      /// Contrôle mathématiquement l'intégrité et la validité temporelle du JWT en RAM.
-      /// </summary>
-      PROCÉDURE ValiderJeton(a_Jeton est une chaîne, a_JsonPayloadSortant est une chaîne) : booléen
+     code : |1+
+      // =============================================================================
+      // Méthode : ValiderJeton
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      //   1. Vérifie la structure JWT.
+      //   2. Vérifie l'algorithme.
+      //   3. Vérifie la signature.
+      //   4. Vérifie l'expiration.
+      //   5. Vérifie qu'il s'agit d'un Access Token.
+      //   6. Vérifie la session serveur.
+      // =============================================================================
+      
+      PROCÉDURE ValiderJeton(...
+      a_Jeton					est une chaîne, ...
+      a_JsonPayloadSortant	est une chaîne, ...
+      a_AdresseIP				est une chaîne	= "", ...
+      a_UserAgent				est une chaîne	= "") : booléen
       
       LOCAL
-      	l_Entete				est une chaîne	= ExtraitChaîne(a_Jeton, 1, ".")
-      	l_ChargeUtile			est une chaîne	= ExtraitChaîne(a_Jeton, 2, ".")
-      	l_SignatureRecue		est une chaîne	= ExtraitChaîne(a_Jeton, 3, ".")
-      	l_DonneesASigner		est une chaîne
-      	l_SignatureCalculee		est un buffer
-      	l_SignatureBase64		est une chaîne
-      	l_PayloadVariant		est un Variant
-      	l_TimestampExp			est un entier
-      	l_DateExpiration		est une DateHeure
-      	l_DateHeureFormattee	est une chaîne
+      	l_Entete			est une chaîne	= ExtraitChaîne(a_Jeton, 1, ".")
+      	l_ChargeUtile		est une chaîne	= ExtraitChaîne(a_Jeton, 2, ".")
+      	l_SignatureRecue	est une chaîne	= ExtraitChaîne(a_Jeton, 3, ".")
       	
-      SI l_Entete = EOT OU l_ChargeUtile = EOT OU l_SignatureRecue = EOT ALORS
-      	_Journaliser("Validation JWT refusée : Jeton malformé (segments manquants).", "SECURITE")
+      	l_DonneesASigner	est une chaîne
+      	l_SignatureCalculee	est un buffer
+      	l_SignatureBase64	est une chaîne
+      	
+      	l_JsonEntete		est une chaîne
+      	l_EnteteVariant		est un Variant
+      	
+      	l_PayloadVariant	est un Variant
+      	
+      	l_TimestampExp		est un entier sur 8 octets
+      	l_DateExpiration	est une DateHeure
+      	
+      	l_Login				est une chaîne
+      	l_IdSession			est une chaîne
+      	l_TypeJeton			est une chaîne
+      	
+      	// =============================================================================
+      	// 1. STRUCTURE
+      	// =============================================================================
+      	
+      SI l_Entete = EOT OU ...
+      	l_ChargeUtile		= EOT OU ...
+      	l_SignatureRecue	= EOT ALORS
+      	
+      	_Journaliser("JWT malformé.", "SECURITE")
+      	
       	RENVOYER Faux
+      	
       FIN
       
-      // 1. Recalcul de la signature
+      // =============================================================================
+      // 2. VÉRIFICATION DE L'EN-TÊTE
+      // =============================================================================
+      
+      QUAND EXCEPTION DANS
+      	
+      	l_JsonEntete	= _DecoderBase64Url(l_Entete)
+      	l_EnteteVariant	= JSONVersVariant(l_JsonEntete)
+      	
+      	SI Majuscule("" + l_EnteteVariant.alg) <> "HS256" ALORS
+      		
+      		_Journaliser("Algorithme JWT refusé.", "SECURITE")
+      		
+      		RENVOYER Faux
+      		
+      	FIN
+      	
+      FAIRE
+      	
+      	_Journaliser("Impossible de décoder l'en-tête JWT.", "SECURITE")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 3. SIGNATURE
+      // =============================================================================
+      
       l_DonneesASigner	= l_Entete + "." + l_ChargeUtile
-      l_SignatureCalculee	= HashChaîne(HA_HMAC_SHA_256, l_DonneesASigner, m_CleSecreteJwt)
-      l_SignatureBase64	= _EncoderBase64Url(l_SignatureCalculee)
+      
+      l_SignatureCalculee	= HashChaîne(...
+      HA_HMAC_SHA_256, ...
+      l_DonneesASigner, ...
+      m_CleSecreteJwt)
+      
+      l_SignatureBase64 = _EncoderBase64Url(l_SignatureCalculee)
       
       SI l_SignatureBase64 <> l_SignatureRecue ALORS
-      	_Journaliser("Validation JWT refusée : Signature HMAC invalide (altération de jeton ou clé secrète divergente).", "SECURITE")
+      	
+      	_Journaliser("Signature JWT invalide.", "SECURITE")
+      	
       	RENVOYER Faux
+      	
       FIN
       
-      // 2. Décodage du payload et vérification temporelle
+      // =============================================================================
+      // 4. PAYLOAD
+      // =============================================================================
+      
       a_JsonPayloadSortant = _DecoderBase64Url(l_ChargeUtile)
       
       QUAND EXCEPTION DANS
+      	
       	l_PayloadVariant	= JSONVersVariant(a_JsonPayloadSortant)
+      	
       	l_TimestampExp		= Val(l_PayloadVariant.exp)
       	
-      	SI l_TimestampExp > 0 ALORS
-      		l_DateExpiration = EpochVersDateHeure(l_TimestampExp)
-      		SI DateHeureSys() > l_DateExpiration ALORS
-      			// Formatage conforme WinDev 25 : DateVersChaîne + HeureVersChaîne
-      			l_DateHeureFormattee = DateVersChaîne(l_DateExpiration..PartieDate, "JJ/MM/AAAA") + " " + HeureVersChaîne(l_DateExpiration..PartieHeure, "HH:MM:SS")
-      			_Journaliser(ChaîneConstruit("Validation JWT refusée : Jeton expiré depuis le %1.", l_DateHeureFormattee), "SECURITE")
-      			RENVOYER Faux
-      		FIN
-      	FIN
+      	l_Login				= "" + l_PayloadVariant.sub
+      	l_IdSession			= "" + l_PayloadVariant.sid
+      	l_TypeJeton			= "" + l_PayloadVariant.token_type
+      	
       FAIRE
-      	_Journaliser("Validation JWT refusée : Échec de désérialisation du payload JSON.", "SECURITE", ExceptionInfo(errComplet))
+      	
+      	_Journaliser(...
+      	"Impossible de désérialiser le payload JWT.", ...
+      	"SECURITE", ...
+      	ExceptionInfo(errComplet))
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 5. TYPE DE TOKEN
+      // =============================================================================
+      
+      SI Minuscule(l_TypeJeton) <> "access" ALORS
+      	
+      	_Journaliser(...
+      	"Tentative d'utilisation d'un token non Access comme JWT API.", ...
+      	"SECURITE")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 6. EXPIRATION
+      // =============================================================================
+      
+      SI l_TimestampExp <= 0 ALORS
       	RENVOYER Faux
       FIN
-      RENVOYER Vrai
+      
+      l_DateExpiration = EpochVersDateHeure(l_TimestampExp)
+      
+      SI DateHeureSys() > l_DateExpiration ALORS
+      	
+      	_Journaliser("Access Token expiré.", "SECURITE")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 7. IDENTITÉ ET SESSION
+      // =============================================================================
+      
+      SI l_Login = "" OU l_IdSession = "" ALORS
+      	RENVOYER Faux
+      FIN
+      
+      SI PAS ValiderSession(...
+      	l_IdSession, ...
+      	l_Login, ...
+      	a_AdresseIP, ...
+      	a_UserAgent) ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"JWT cryptographiquement valide mais session serveur refusée [%1].", ...
+      	l_IdSession), ...
+      	"SECURITE")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      RENVOYER Vrai                                                      // =============================================================================
      type : 458752
    -
      name : VerifierSecuriteRequete
-     procedure_id : 1917953856904017518
+     procedure_id : 1923064292464108201
      type_code : 12
-     code : |1+
-      /// <summary>
-      /// Videur HTTP universel : routes publiques, bypass mode test et validation JWT.
-      /// </summary>
+     code : |1-
+      
+      // Méthode : VerifierSecuriteRequete
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Contrôle central de toutes les routes protégées.
+      //
+      // Sécurité :
+      //   - Authorization: Bearer obligatoire.
+      //   - Aucun JWT dans l'URL.
+      //   - Validation cryptographique.
+      //   - Validation de la session HFSQL.
+      // =============================================================================
       PROCÉDURE VerifierSecuriteRequete(a_SocketRecu est un CLCanalSocket) : booléen
       
       LOCAL
-      	l_UrlRequete			est une chaîne	= a_SocketRecu.m_UrlRecue
-      	l_JetonRecu				est une chaîne	= ""
-      	l_ChargeUtileJson		est une chaîne	= ""
+      	l_UrlRequete		est une chaîne	= a_SocketRecu.m_UrlRecue
+      	l_JetonRecu			est une chaîne	= ""
+      	l_ChargeUtileJson	est une chaîne	= ""
       	
-      // 1. FAIL-SAFE DEFAULT : Liste blanche publique
-      SI Position(l_UrlRequete, "/api/auth/login", 1, SansCasse) = 1 ALORS RENVOYER Vrai
-      SI Position(l_UrlRequete, "/api/v1/data/public/", 1, SansCasse) = 1 ALORS RENVOYER Vrai
-      SI Position(l_UrlRequete, ".well-known/acme-challenge/", 1, SansCasse) = 1 ALORS RENVOYER Vrai
+      	// =============================================================================
+      	// 1. ROUTES PUBLIQUES
+      	// =============================================================================
+      	
+      SI Position(l_UrlRequete, "/api/v1/auth/login", 1, SansCasse) = 1 ALORS
+      	RENVOYER Vrai
+      FIN
       
-      // 2. Extraction du jeton depuis l'en-tête natif Authorization du canal socket
+      SI Position(l_UrlRequete, "/api/v1/auth/refresh", 1, SansCasse) = 1 ALORS
+      	RENVOYER Vrai
+      FIN
+      
+      SI Position(l_UrlRequete, "/api/v1/data/public/", 1, SansCasse) = 1 ALORS
+      	RENVOYER Vrai
+      FIN
+      
+      SI Position(l_UrlRequete, ".well-known/acme-challenge/", 1, SansCasse) = 1 ALORS
+      	RENVOYER Vrai
+      FIN
+      
+      // =============================================================================
+      // 2. INTERDICTION ABSOLUE D'EXPOSER SessionSecurite VIA L'ORM REST GÉNÉRIQUE
+      // =============================================================================
+      
+      SI Position(...
+      	l_UrlRequete, ...
+      	"/api/v1/data/" + m_NomTableSessions, ...
+      	1, ...
+      	SansCasse) = 1 ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"Tentative d'accès REST générique à la table de sécurité '%1'.", ...
+      	m_NomTableSessions), ...
+      	"SECURITE")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 3. EXTRACTION DU BEARER TOKEN
+      // =============================================================================
+      
       l_JetonRecu = a_SocketRecu.m_Parametres["Authorization"]
       
       SI Position(l_JetonRecu, "Bearer ", 1, SansCasse) = 1 ALORS
-      	l_JetonRecu = SansEspace(Remplace(l_JetonRecu, "Bearer ", "", SansCasse))
+      	
+      	l_JetonRecu = SansEspace(...
+      	Remplace(l_JetonRecu, "Bearer ", "", SansCasse))
+      	
+      SINON
+      	
+      	l_JetonRecu = ""
+      	
       FIN
       
-      // Tolérance : lecture d'un paramètre d'URL "token" si présent dans m_Parametres
-      SI l_JetonRecu = "" ET a_SocketRecu.m_Parametres["token"]..Existe ALORS
-      	l_JetonRecu = a_SocketRecu.m_Parametres["token"]
-      FIN
+      // IMPORTANT :
+      // La récupération historique via ?token=XXX est volontairement supprimée.
       
-      SI l_JetonRecu = "" ALORS 
-      	_Journaliser(ChaîneConstruit("Accès non autorisé sur '%1' : Jeton absent.", l_UrlRequete), "SECURITE")
+      SI l_JetonRecu = "" ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"Accès refusé sur '%1' : Bearer Token absent.", ...
+      	l_UrlRequete), ...
+      	"SECURITE")
+      	
       	RENVOYER Faux
+      	
       FIN
       
-      // 3. Mode Test / Développement (clé de contournement configurée)
+      // =============================================================================
+      // 4. MODE TEST
+      // =============================================================================
+      
       SI m_ModeTestActif = Vrai ALORS
+      	
       	SI m_CleTest <> "" ET l_JetonRecu = m_CleTest ALORS
-      		_Journaliser(ChaîneConstruit("Contournement de sécurité actif (Clé Test) pour l'accès à '%1'.", l_UrlRequete), "AVERTISSEMENT")
+      		
+      		_Journaliser(...
+      		ChaîneConstruit(...
+      		"Contournement sécurité ModeTest utilisé pour '%1'.", ...
+      		l_UrlRequete), ...
+      		"AVERTISSEMENT")
+      		
       		RENVOYER Vrai
+      		
       	FIN
+      	
       FIN
       
-      // 4. Validation cryptographique en mémoire RAM (Zéro requête HFSQL)
-      SI PAS ValiderJeton(l_JetonRecu, l_ChargeUtileJson) ALORS
-      	_Journaliser(ChaîneConstruit("Accès refusé sur '%1' : Jeton invalide ou altéré.", l_UrlRequete), "SECURITE")
+      // =============================================================================
+      // 5. JWT + SESSION SERVEUR
+      // =============================================================================
+      
+      SI PAS ValiderJeton(...
+      	l_JetonRecu, ...
+      	l_ChargeUtileJson, ...
+      	a_SocketRecu.m_AdresseIp, ...
+      	a_SocketRecu.m_UserAgent) ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"Accès refusé sur '%1' : JWT ou session invalide.", ...
+      	l_UrlRequete), ...
+      	"SECURITE")
+      	
       	RENVOYER Faux
+      	
       FIN
       
       RENVOYER Vrai
@@ -436,11 +841,21 @@ class :
       //           2. Si absente, exécute le CREATE TABLE et référence le prototype dans m_Base.
       //           3. Si la table est vide, crée le compte par défaut via l'ORM en alimentant m_json.
       // Version : WinDev 25 Strict
-      // ==============================================================================
+      // ========================================================// =============================================================================
+      // Méthode : InitialiserSocleSecurite
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      //   1. Vérifie la configuration cryptographique.
+      //   2. Initialise la table utilisateur si nécessaire.
+      //   3. Ajoute la rubrique "actif" aux utilisateurs existants.
+      //   4. Initialise automatiquement la table SessionSecurite.
+      //   5. Enregistre les tables nouvellement créées dans le référentiel ORM RAAD.
+      // =============================================================================
      type : 458752
    -
      name : InitialiserSocleSecurite
-     procedure_id : 1918221137015359386
+     procedure_id : 1923060972453680991
      type_code : 12
      code : |1-
       PROCÉDURE InitialiserSocleSecurite() : booléen
@@ -448,81 +863,1389 @@ class :
       LOCAL
       	l_RequeteCreation		est une chaîne
       	l_SourceCreation		est une Source de Données
-      	l_PrototypeSecurite		est un CLEnregistrement
+      	
+      	l_PrototypeUtilisateur	est un dynamique CLEnregistrement
+      	l_PrototypeSession		est un dynamique CLEnregistrement
+      	
       	l_EnregistrementCourant	est un CLEnregistrement dynamique
       	l_DonneesAdmin			est un Variant
       	l_MotDePasseHache		est une chaîne
       	
-      // ------------------------------------------------------------------------------
-      // 1. CONTRÔLE DE L'EXISTENCE DANS LE RÉFÉRENTIEL ORM (m_Base.m_Table)
-      // ------------------------------------------------------------------------------
-      SI PAS m_Base.m_Table[m_NomTableUtilisateurs]..Existe ALORS
-      	_Journaliser(ChaîneConstruit("Table '%1' absente de m_Base.m_Table. Création physique SQL...", m_NomTableUtilisateurs), "INFO")
+      	l_Provider				est une chaîne
+      	l_Serveur				est une chaîne
+      	l_NomBase				est une chaîne
+      	l_UtilisateurBDD		est une chaîne
+      	l_MotDePasseBDD			est une chaîne
       	
-      	// Construction DDL dynamique selon les rubriques spécifiées dans config.conf
-      	l_RequeteCreation = ChaîneConstruit("CREATE TABLE %1 (ID_%1 BIGINT NOT NULL PRIMARY KEY, %2 VARCHAR(150), %3 VARCHAR(255))", ...
-      	m_NomTableUtilisateurs, m_RubriqueLogin, m_RubriqueMotDePasse)
+      	// =============================================================================
+      	// 1. VALIDATION DE LA CLÉ JWT
+      	// =============================================================================
       	
-      	SI PAS HExécuteRequêteSQL(l_SourceCreation, m_Base.m_Connexion, hRequêteDéfaut, l_RequeteCreation) ALORS
-      		_Journaliser(ChaîneConstruit("Échec de la création DDL de la table %1 : %2", m_NomTableUtilisateurs, HErreurInfo(hErrComplet)), "CRITIQUE")
-      		HAnnuleDéclaration(l_SourceCreation)
-      		RENVOYER Faux
-      	FIN
-      	HAnnuleDéclaration(l_SourceCreation)
+      SI SansEspace(m_CleSecreteJwt) = "" ALORS
       	
-      	// Initialisation du prototype ORM et inscription dans le tableau associatif de m_Base
-      	l_PrototypeSecurite.Init(m_NomTableUtilisateurs)
-      	m_Base.m_Table[m_NomTableUtilisateurs] = l_PrototypeSecurite
+      	_Journaliser(...
+      	"Initialisation sécurité impossible : CleSecreteJwt absente de config.conf.", ...
+      	"CRITIQUE")
       	
-      	_Journaliser(ChaîneConstruit("Table '%1' créée et enregistrée avec succès dans m_Base.m_Table.", m_NomTableUtilisateurs), "INFO")
+      	RENVOYER Faux
+      	
       FIN
       
-      // ------------------------------------------------------------------------------
-      // 2. CONTRÔLE DU CONTENU ET AMORÇAGE AUTOMATIQUE VIA CLEnregistrement
-      // ------------------------------------------------------------------------------
-      // Décompte instantané en O(1) via le moteur HFSQL
-      SI HNbEnr(m_NomTableUtilisateurs) = 0 ALORS
-      	_Journaliser("Table d'utilisateurs vierge. Amorçage automatique du compte par défaut (admin) via l'ORM...", "INFO")
+      // =============================================================================
+      // 2. RÉCUPÉRATION DE LA CONFIGURATION HFSQL
+      // =============================================================================
+      
+      l_Provider			= m_Configuration.LireParametreBDD("Provider", "WinDevClientServeurHF")
+      l_Serveur			= m_Configuration.LireParametreBDD("Serveur", "127.0.0.1")
+      l_NomBase			= m_Configuration.LireParametreBDD("BaseDeDonnées", "")
+      l_UtilisateurBDD	= m_Configuration.LireParametreBDD("Utilisateur", "admin")
+      l_MotDePasseBDD		= m_Configuration.LireParametreBDD("MotDePasse", "")
+      
+      // =============================================================================
+      // 3. INITIALISATION DE LA TABLE UTILISATEUR
+      // =============================================================================
+      
+      SI PAS m_Base.m_Table[m_NomTableUtilisateurs]..Existe ALORS
       	
-      	// Instanciation dynamique isolée pour le thread courant (Anti Race-Condition)
+      	_Journaliser(...
+      	ChaîneConstruit("Table '%1' absente. Création automatique du référentiel utilisateurs.", m_NomTableUtilisateurs), ...
+      	"INFO")
+      	
+      	l_RequeteCreation = ChaîneConstruit(...
+      	"CREATE TABLE %1 (" + ...
+      	"ID_%1 BIGINT NOT NULL PRIMARY KEY, " + ...
+      	"%2 VARCHAR(150), " + ...
+      	"%3 VARCHAR(255), " + ...
+      	"%4 INTEGER DEFAULT 1)", ...
+      	m_NomTableUtilisateurs, ...
+      	m_RubriqueLogin, ...
+      	m_RubriqueMotDePasse, ...
+      	m_RubriqueActifUtilisateur)
+      	
+      	SI PAS HExécuteRequêteSQL(l_SourceCreation, m_Base.m_connexion, hRequêteDéfaut, l_RequeteCreation) ALORS
+      		
+      		_Journaliser(...
+      		ChaîneConstruit("Échec création table '%1' : %2", m_NomTableUtilisateurs, HErreurInfo(hErrComplet)), ...
+      		"CRITIQUE")
+      		
+      		HAnnuleDéclaration(l_SourceCreation)
+      		
+      		RENVOYER Faux
+      		
+      	FIN
+      	
+      	HAnnuleDéclaration(l_SourceCreation)
+      	
+      	// Déclaration de la nouvelle table dans le moteur HFSQL.
+      	HDéclareExterne(m_NomTableUtilisateurs + ".fic", m_NomTableUtilisateurs, m_Base.m_connexion)
+      	
+      	// Création du prototype ORM.
+      	l_PrototypeUtilisateur = allouer un CLEnregistrement()
+      	
+      	l_PrototypeUtilisateur.ConfigurerAccesBdd(...
+      	l_Provider, ...
+      	l_Serveur, ...
+      	l_NomBase, ...
+      	l_UtilisateurBDD, ...
+      	l_MotDePasseBDD, ...
+      	m_Journal)
+      	
+      	l_PrototypeUtilisateur.Init(m_NomTableUtilisateurs)
+      	
+      	m_Base.m_Table[m_NomTableUtilisateurs] = l_PrototypeUtilisateur
+      	
+      FIN
+      
+      // =============================================================================
+      // 4. AJOUT DE LA RUBRIQUE "ACTIF" AUX INSTALLATIONS EXISTANTES
+      // =============================================================================
+      
+      SI PAS _RubriqueExiste(m_NomTableUtilisateurs, m_RubriqueActifUtilisateur) ALORS
+      	
+      	l_RequeteCreation = ChaîneConstruit(...
+      	"ALTER TABLE %1 ADD %2 INTEGER DEFAULT 1", ...
+      	m_NomTableUtilisateurs, ...
+      	m_RubriqueActifUtilisateur)
+      	
+      	SI PAS HExécuteRequêteSQL(l_SourceCreation, m_Base.m_connexion, hRequêteDéfaut, l_RequeteCreation) ALORS
+      		
+      		_Journaliser(...
+      		ChaîneConstruit(...
+      		"Impossible d'ajouter la rubrique '%1' dans '%2' : %3", ...
+      		m_RubriqueActifUtilisateur, ...
+      		m_NomTableUtilisateurs, ...
+      		HErreurInfo(hErrComplet)), ...
+      		"CRITIQUE")
+      		
+      		HAnnuleDéclaration(l_SourceCreation)
+      		
+      		RENVOYER Faux
+      		
+      	FIN
+      	
+      	HAnnuleDéclaration(l_SourceCreation)
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"Rubrique '%1' ajoutée automatiquement à la table '%2'.", ...
+      	m_RubriqueActifUtilisateur, ...
+      	m_NomTableUtilisateurs), ...
+      	"INFO")
+      	
+      FIN
+      
+      // =============================================================================
+      // 5. CRÉATION DE LA TABLE CENTRALE DES SESSIONS
+      // =============================================================================
+      //
+      // IMPORTANT :
+      // Aucun Access Token ou Refresh Token n'est enregistré en clair.
+      //
+      // RefreshHash contient uniquement l'empreinte cryptographique du Refresh Token.
+      //
+      // ID_Session permet d'identifier un appareil / une connexion indépendamment
+      // des JWT successifs générés pendant plusieurs semaines ou plusieurs mois.
+      // =============================================================================
+      
+      SI PAS m_Base.m_Table[m_NomTableSessions]..Existe ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Table de sessions '%1' absente. Création automatique.", m_NomTableSessions), ...
+      	"INFO")
+      	
+      	l_RequeteCreation = ChaîneConstruit(...
+      	"CREATE TABLE %1 (" + ...
+      	"ID_Session VARCHAR(80) NOT NULL PRIMARY KEY, " + ...
+      	"LoginUtilisateur VARCHAR(150) NOT NULL, " + ...
+      	"RefreshHash VARCHAR(160) NOT NULL, " + ...
+      	"RefreshHashPrecedent VARCHAR(160), " + ...
+      	"DateCreationEpoch BIGINT NOT NULL, " + ...
+      	"DateDerniereActiviteEpoch BIGINT NOT NULL, " + ...
+      	"DateExpirationAbsolueEpoch BIGINT NOT NULL, " + ...
+      	"DateRotationEpoch BIGINT DEFAULT 0, " + ...
+      	"CompteurRotation BIGINT DEFAULT 0, " + ...
+      	"Revoquee INTEGER DEFAULT 0, " + ...
+      	"DateRevocationEpoch BIGINT DEFAULT 0, " + ...
+      	"MotifRevocation VARCHAR(255), " + ...
+      	"IPCreation VARCHAR(64), " + ...
+      	"DerniereIP VARCHAR(64), " + ...
+      	"UserAgentCreation VARCHAR(512), " + ...
+      	"DernierUserAgent VARCHAR(512), " + ...
+      	"NomAppareil VARCHAR(255))", ...
+      	m_NomTableSessions)
+      	
+      	SI PAS HExécuteRequêteSQL(l_SourceCreation, m_Base.m_connexion, hRequêteDéfaut, l_RequeteCreation) ALORS
+      		
+      		_Journaliser(...
+      		ChaîneConstruit(...
+      		"Échec création table '%1' : %2", ...
+      		m_NomTableSessions, ...
+      		HErreurInfo(hErrComplet)), ...
+      		"CRITIQUE")
+      		
+      		HAnnuleDéclaration(l_SourceCreation)
+      		
+      		RENVOYER Faux
+      		
+      	FIN
+      	
+      	HAnnuleDéclaration(l_SourceCreation)
+      	
+      	// Déclaration dynamique dans le moteur HFSQL.
+      	HDéclareExterne(m_NomTableSessions + ".fic", m_NomTableSessions, m_Base.m_connexion)
+      	
+      	// Création du prototype ORM exactement comme les autres tables RAAD.
+      	l_PrototypeSession = allouer un CLEnregistrement()
+      	
+      	l_PrototypeSession.ConfigurerAccesBdd(...
+      	l_Provider, ...
+      	l_Serveur, ...
+      	l_NomBase, ...
+      	l_UtilisateurBDD, ...
+      	l_MotDePasseBDD, ...
+      	m_Journal)
+      	
+      	l_PrototypeSession.Init(m_NomTableSessions)
+      	
+      	m_Base.m_Table[m_NomTableSessions] = l_PrototypeSession
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Table de sessions '%1' initialisée avec succès.", m_NomTableSessions), ...
+      	"INFO")
+      	
+      FIN
+      
+      // =============================================================================
+      // 6. CRÉATION DU PREMIER ADMINISTRATEUR SI TABLE VIDE
+      // =============================================================================
+      
+      SI HNbEnr(m_NomTableUtilisateurs) = 0 ALORS
+      	
+      	_Journaliser(...
+      	"Table utilisateurs vierge. Création du compte administrateur initial.", ...
+      	"INFO")
+      	
       	l_EnregistrementCourant = allouer un CLEnregistrement()
+      	
       	l_EnregistrementCourant <= m_Base.m_Table[m_NomTableUtilisateurs]
       	
-      	// Préparation de l'empreinte du mot de passe haché avec le sel
-      	l_MotDePasseHache						= HacherMotDePasse("admin")
+      	l_MotDePasseHache							= HacherMotDePasse("admin")
       	
-      	// Construction des données selon les rubriques dynamiques configurées
-      	l_DonneesAdmin[m_RubriqueLogin]			= "admin"
-      	l_DonneesAdmin[m_RubriqueMotDePasse]	= l_MotDePasseHache
+      	l_DonneesAdmin[m_RubriqueLogin]				= "admin"
+      	l_DonneesAdmin[m_RubriqueMotDePasse]		= l_MotDePasseHache
+      	l_DonneesAdmin[m_RubriqueActifUtilisateur]	= 1
       	
-      	// Sécurité clé primaire : initialisation si la clé unique de la table est résolue
       	SI l_EnregistrementCourant.m_CleUnique <> "" ALORS
       		l_DonneesAdmin[l_EnregistrementCourant.m_CleUnique] = 1
       	FIN
       	
-      	// ARCHITECTURE RAAD : Affectation de la chaîne JSON dans le membre m_json avant appel
       	l_EnregistrementCourant.m_json = VariantVersJSON(l_DonneesAdmin)
       	
-      	// Exécution de Creer() sans aucun paramètre
       	QUAND EXCEPTION DANS
+      		
       		l_EnregistrementCourant.Creer()
+      		
       	FAIRE
-      		_Journaliser("Exception lors de l'exécution de Creer() pour le compte administrateur initial.", "CRITIQUE", ExceptionInfo(errComplet))
+      		
+      		_Journaliser(...
+      		"Exception durant la création du compte administrateur initial.", ...
+      		"CRITIQUE", ...
+      		ExceptionInfo(errComplet))
+      		
       	FIN
       	
-      	// Vérification de la persistance effective dans la table HFSQL
-      	SI HNbEnr(m_NomTableUtilisateurs) = 0 ALORS
-      		_Journaliser("Échec de l'insertion de l'administrateur initial par l'ORM.", "CRITIQUE")
-      		libérer l_EnregistrementCourant
-      		RENVOYER Faux
-      	FIN
-      	
-      	// Libération mémoire obligatoire
       	libérer l_EnregistrementCourant
-      	_Journaliser("Compte administrateur initial généré avec succès par l'ORM.", "INFO")
+      	
       FIN
       
       RENVOYER Vrai
+     type : 458752
+   -
+     name : _RubriqueExiste
+     procedure_id : 1923060835014630202
+     type_code : 12
+     code : |1+
+      // =============================================================================
+      // Méthode : _RubriqueExiste
+      // Classe  : CLSecurite
+      // Rôle    : Vérifie dynamiquement qu'une rubrique existe dans une table HFSQL.
+      // =============================================================================
+      PROCÉDURE PRIVÉE _RubriqueExiste(a_NomTable est une chaîne, a_NomRubrique est une chaîne) : booléen
+      
+      LOCAL
+      	l_ListeRubriques		est une chaîne
+      	l_NomRubriqueCourante	est une chaîne
+      	
+      QUAND EXCEPTION DANS
+      	
+      	l_ListeRubriques = HListeRubrique(a_NomTable)
+      	
+      	POUR TOUTE CHAÎNE l_Ligne DE l_ListeRubriques SÉPARÉE PAR RC
+      		
+      		l_NomRubriqueCourante = SansEspace(ExtraitChaîne(l_Ligne, 1, TAB))
+      		
+      		SI Minuscule(l_NomRubriqueCourante) = Minuscule(a_NomRubrique) ALORS
+      			RENVOYER Vrai
+      		FIN
+      		
+      	FIN
+      	
+      FAIRE
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Impossible d'analyser les rubriques de la table '%1'.", a_NomTable), ...
+      	"ERREUR", ...
+      	ExceptionInfo(errComplet))
+      	
+      FIN
+      
+      RENVOYER Faux
+      
+     type : 458752
+   -
+     name : _GenererSecretAleatoire
+     procedure_id : 1923061187202162015
+     type_code : 12
+     code : |1-
+      // =============================================================================
+      // Méthode : _GenererSecretAleatoire
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Génère un secret cryptographiquement difficile à prédire.
+      // Utilisé pour constituer le Refresh Token.
+      // =============================================================================
+      
+      PROCÉDURE PRIVÉE _GenererSecretAleatoire() : chaîne
+      
+      LOCAL
+      	l_MatiereAleatoire	est une chaîne
+      	l_Empreinte			est un buffer
+      	
+      	// Plusieurs GUID indépendants sont combinés afin de disposer d'une matière
+      // aléatoire largement supérieure aux besoins d'un token de session.
+      l_MatiereAleatoire = ...
+      DonneGUID(guidBrut) + ...
+      DonneGUID(guidBrut) + ...
+      DonneGUID(guidBrut) + ...
+      DonneGUID(guidBrut)
+      
+      // HMAC avec la clé secrète propre au serveur RAAD.
+      l_Empreinte = HashChaîne(...
+      HA_HMAC_SHA_512, ...
+      l_MatiereAleatoire, ...
+      m_CleSecreteJwt)
+      
+      // Encodage URL Safe sans caractères "=" "+" "/".
+      RENVOYER _EncoderBase64Url(l_Empreinte)
+     type : 458752
+   -
+     name : _HacherJeton
+     procedure_id : 1923061316051210536
+     type_code : 12
+     code : |1+
+      
+      
+      
+      
+      // =============================================================================
+      // Méthode : _HacherJeton
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Calcule l'empreinte irréversible d'un Refresh Token.
+      // Le token réel ne doit jamais être stocké dans HFSQL.
+      // =============================================================================
+      PROCÉDURE PRIVÉE _HacherJeton(a_Jeton est une chaîne) : chaîne
+      
+      LOCAL
+      	l_Empreinte est un buffer
+      	
+      l_Empreinte = HashChaîne(...
+      HA_HMAC_SHA_256, ...
+      a_Jeton, ...
+      m_CleSecreteJwt)
+      
+      RENVOYER Majuscule(BufferVersHexa(l_Empreinte))
+      
+     type : 458752
+   -
+     name : EstUtilisateurActif
+     procedure_id : 1923061779907852008
+     type_code : 12
+     code : |1+
+      
+      
+      
+      
+      
+      // =============================================================================
+      // Méthode : EstUtilisateurActif
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Vérifie qu'un compte utilisateur existe et qu'il n'a pas été désactivé.
+      // =============================================================================
+      PROCÉDURE EstUtilisateurActif(a_Login est une chaîne) : booléen
+      
+      LOCAL
+      	l_EnregistrementCourant		est un CLEnregistrement dynamique
+      	l_ConditionRecherche		est une chaîne
+      	l_JsonResultat				est une chaîne
+      	l_DonneesVariant			est un Variant
+      	l_Actif						est un entier	= 0
+      	
+      SI PAS m_Base.m_Table[m_NomTableUtilisateurs]..Existe ALORS
+      	RENVOYER Faux
+      FIN
+      
+      l_EnregistrementCourant = allouer un CLEnregistrement()
+      
+      l_EnregistrementCourant <= m_Base.m_Table[m_NomTableUtilisateurs]
+      
+      l_ConditionRecherche = ChaîneConstruit(...
+      "%1 = '%2'", ...
+      m_RubriqueLogin, ...
+      Remplace(a_Login, "'", "''"))
+      
+      QUAND EXCEPTION DANS
+      	
+      	// Vrai = ignorer le cache.
+      	// L'état d'un utilisateur doit toujours être contrôlé en temps réel.
+      	l_EnregistrementCourant.Charger("", l_ConditionRecherche, Vrai)
+      	
+      	l_JsonResultat = SansEspace(l_EnregistrementCourant.m_json)
+      	
+      	SI l_JsonResultat <> "" ET ...
+      		l_JsonResultat <> "{}" ET ...
+      		l_JsonResultat <> "null" ALORS
+      		
+      		l_DonneesVariant = JSONVersVariant(l_JsonResultat)
+      		
+      		SI l_DonneesVariant[m_RubriqueActifUtilisateur] <> Null ALORS
+      			l_Actif = Val(l_DonneesVariant[m_RubriqueActifUtilisateur])
+      		FIN
+      		
+      	FIN
+      	
+      FAIRE
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Erreur lors du contrôle d'état de l'utilisateur '%1'.", a_Login), ...
+      	"SECURITE", ...
+      	ExceptionInfo(errComplet))
+      	
+      	l_Actif = 0
+      	
+      FIN
+      
+      libérer l_EnregistrementCourant
+      
+      RENVOYER (l_Actif = 1)
+      
+     type : 458752
+   -
+     name : CreerSession
+     procedure_id : 1923062140685189325
+     type_code : 12
+     code : |1+
+      
+      
+      
+      
+      // =============================================================================
+      // Méthode : CreerSession
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Crée une nouvelle session persistante après authentification réussie.
+      //
+      // Retourne :
+      //   - ID de session
+      //   - Refresh Token
+      //
+      // IMPORTANT :
+      // Le Refresh Token réel est retourné au client mais seule son empreinte
+      // cryptographique est enregistrée dans HFSQL.
+      // =============================================================================
+      PROCÉDURE CreerSession(...
+      a_Login					est une chaîne, ...
+      a_AdresseIP				est une chaîne, ...
+      a_UserAgent				est une chaîne, ...
+      a_NomAppareil			est une chaîne, ...
+      a_IdSessionSortant		est une chaîne, ...
+      a_RefreshTokenSortant	est une chaîne) : booléen
+      
+      LOCAL
+      	l_EnregistrementSession	est un CLEnregistrement dynamique
+      	l_DonneesSession		est un Variant
+      	
+      	l_IdSession				est une chaîne
+      	l_SecretRefresh			est une chaîne
+      	l_RefreshToken			est une chaîne
+      	l_RefreshHash			est une chaîne
+      	
+      	l_DateCreation			est une DateHeure
+      	l_DateExpirationAbsolue	est une DateHeure
+      	
+      	l_EpochCreation			est un entier sur 8 octets
+      	l_EpochExpiration		est un entier sur 8 octets
+      	
+      	// =============================================================================
+      	// 1. CONTRÔLE DE L'UTILISATEUR
+      	// =============================================================================
+      	
+      SI PAS EstUtilisateurActif(a_Login) ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Création de session refusée : utilisateur '%1' inactif.", a_Login), ...
+      	"SECURITE")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 2. GÉNÉRATION DE L'IDENTIFIANT DE SESSION
+      // =============================================================================
+      
+      l_IdSession				= DonneGUID(guidBrut)
+      
+      // =============================================================================
+      // 3. GÉNÉRATION DU REFRESH TOKEN
+      //
+      // Structure volontaire :
+      //     ID_SESSION.SECRET
+      //
+      // Le serveur peut donc retrouver immédiatement la session correspondante,
+      // sans devoir rechercher le Refresh Token dans toute la table.
+      // =============================================================================
+      
+      l_SecretRefresh			= _GenererSecretAleatoire()
+      
+      l_RefreshToken			= l_IdSession + "." + l_SecretRefresh
+      
+      l_RefreshHash			= _HacherJeton(l_RefreshToken)
+      
+      // =============================================================================
+      // 4. CALCUL DES DATES
+      // =============================================================================
+      
+      l_DateCreation			= DateHeureSys()
+      
+      l_DateExpirationAbsolue	= l_DateCreation
+      
+      l_DateExpirationAbsolue..Jour += m_DureeSessionAbsolueJours
+      
+      l_EpochCreation									= DateHeureVersEpoch(l_DateCreation)
+      l_EpochExpiration								= DateHeureVersEpoch(l_DateExpirationAbsolue)
+      
+      // =============================================================================
+      // 5. CONSTRUCTION DE L'ENREGISTREMENT
+      // =============================================================================
+      
+      l_DonneesSession.ID_Session						= l_IdSession
+      l_DonneesSession.LoginUtilisateur				= a_Login
+      
+      l_DonneesSession.RefreshHash					= l_RefreshHash
+      l_DonneesSession.RefreshHashPrecedent			= ""
+      
+      l_DonneesSession.DateCreationEpoch				= l_EpochCreation
+      l_DonneesSession.DateDerniereActiviteEpoch		= l_EpochCreation
+      l_DonneesSession.DateExpirationAbsolueEpoch		= l_EpochExpiration
+      
+      l_DonneesSession.DateRotationEpoch				= 0
+      l_DonneesSession.CompteurRotation				= 0
+      
+      l_DonneesSession.Revoquee						= 0
+      l_DonneesSession.DateRevocationEpoch			= 0
+      l_DonneesSession.MotifRevocation				= ""
+      
+      l_DonneesSession.IPCreation						= a_AdresseIP
+      l_DonneesSession.DerniereIP						= a_AdresseIP
+      
+      l_DonneesSession.UserAgentCreation				= a_UserAgent
+      l_DonneesSession.DernierUserAgent				= a_UserAgent
+      
+      l_DonneesSession.NomAppareil					= a_NomAppareil
+      
+      // =============================================================================
+      // 6. INSERTION VIA L'ORM RAAD
+      // =============================================================================
+      
+      l_EnregistrementSession							= allouer un CLEnregistrement()
+      
+      l_EnregistrementSession <= m_Base.m_Table[m_NomTableSessions]
+      
+      l_EnregistrementSession.m_json = VariantVersJSON(l_DonneesSession)
+      
+      QUAND EXCEPTION DANS
+      	
+      	l_EnregistrementSession.Creer()
+      	
+      FAIRE
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Impossible de créer la session de '%1'.", a_Login), ...
+      	"CRITIQUE", ...
+      	ExceptionInfo(errComplet))
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      SI l_EnregistrementSession.m_erreur <> "" ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"Erreur création session '%1' : %2", ...
+      	l_IdSession, ...
+      	l_EnregistrementSession.m_erreur), ...
+      	"CRITIQUE")
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      libérer l_EnregistrementSession
+      
+      // =============================================================================
+      // 7. RETOUR AU CLIENT
+      // =============================================================================
+      
+      a_IdSessionSortant		= l_IdSession
+      a_RefreshTokenSortant	= l_RefreshToken
+      
+      _Journaliser(...
+      ChaîneConstruit(...
+      "Nouvelle session créée pour '%1' [Session: %2 / IP: %3].", ...
+      a_Login, ...
+      l_IdSession, ...
+      a_AdresseIP), ...
+      "INFO")
+      
+      RENVOYER Vrai
+     type : 458752
+   -
+     name : ValiderSession
+     procedure_id : 1923063248786943689
+     type_code : 12
+     code : |1+
+      
+      
+      
+      
+      // =============================================================================
+      // Méthode : ValiderSession
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Vérifie en temps réel :
+      //   - que la session existe,
+      //   - qu'elle n'est pas révoquée,
+      //   - que l'utilisateur est encore actif,
+      //   - que la session n'a pas dépassé sa durée absolue,
+      //   - que la durée maximale d'inactivité n'est pas dépassée.
+      //
+      // La dernière activité est actualisée à chaque utilisation valide.
+      // =============================================================================
+      PROCÉDURE ValiderSession(...
+      a_IdSession	est une chaîne, ...
+      a_Login		est une chaîne, ...
+      a_AdresseIP	est une chaîne	= "", ...
+      a_UserAgent	est une chaîne	= "") : booléen
+      
+      LOCAL
+      	l_EnregistrementSession		est un CLEnregistrement dynamique
+      	l_ConditionRecherche		est une chaîne
+      	l_JsonResultat				est une chaîne
+      	
+      	l_DonneesSession			est un Variant
+      	l_DonneesModification		est un Variant
+      	
+      	l_LoginSession				est une chaîne
+      	
+      	l_MaintenantEpoch			est un entier sur 8 octets
+      	l_DerniereActiviteEpoch		est un entier sur 8 octets
+      	l_ExpirationAbsolueEpoch	est un entier sur 8 octets
+      	
+      	l_DureeInactiviteSecondes	est un entier sur 8 octets
+      	
+      	// =============================================================================
+      	// 1. CHARGEMENT DIRECT DE LA SESSION
+      	// =============================================================================
+      	
+      l_EnregistrementSession = allouer un CLEnregistrement()
+      
+      l_EnregistrementSession <= m_Base.m_Table[m_NomTableSessions]
+      
+      l_ConditionRecherche = ChaîneConstruit(...
+      "ID_Session = '%1'", ...
+      Remplace(a_IdSession, "'", "''"))
+      
+      l_EnregistrementSession.Charger("", l_ConditionRecherche, Vrai)
+      
+      l_JsonResultat = SansEspace(l_EnregistrementSession.m_json)
+      
+      SI l_JsonResultat = "" OU ...
+      	l_JsonResultat	= "{}" OU ...
+      	l_JsonResultat	= "null" ALORS
+      	
+      	libérer l_EnregistrementSession
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Session inconnue : '%1'.", a_IdSession), ...
+      	"SECURITE")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      l_DonneesSession	= JSONVersVariant(l_JsonResultat)
+      
+      // =============================================================================
+      // 2. CONTRÔLE DE L'IDENTITÉ ASSOCIÉE
+      // =============================================================================
+      
+      l_LoginSession		= "" + l_DonneesSession.LoginUtilisateur
+      
+      SI Minuscule(l_LoginSession) <> Minuscule(a_Login) ALORS
+      	
+      	libérer l_EnregistrementSession
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"Incohérence session/utilisateur détectée [Session: %1].", ...
+      	a_IdSession), ...
+      	"SECURITE")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 3. CONTRÔLE DE RÉVOCATION
+      // =============================================================================
+      
+      SI Val(l_DonneesSession.Revoquee) = 1 ALORS
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 4. CONTRÔLE DU COMPTE UTILISATEUR
+      // =============================================================================
+      
+      SI PAS EstUtilisateurActif(l_LoginSession) ALORS
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 5. CONTRÔLES TEMPORELS
+      // =============================================================================
+      
+      l_MaintenantEpoch			= DateHeureVersEpoch(DateHeureSys())
+      l_DerniereActiviteEpoch		= Val(l_DonneesSession.DateDerniereActiviteEpoch)
+      l_ExpirationAbsolueEpoch	= Val(l_DonneesSession.DateExpirationAbsolueEpoch)
+      
+      l_DureeInactiviteSecondes	= m_DureeSessionInactiviteJours * 86400
+      
+      // Expiration absolue.
+      SI l_MaintenantEpoch > l_ExpirationAbsolueEpoch ALORS
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RevoquerSession(a_IdSession, "Expiration absolue de la session")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // Expiration après longue période sans activité.
+      SI l_DerniereActiviteEpoch > 0 ET ...
+      	(l_MaintenantEpoch - l_DerniereActiviteEpoch) > l_DureeInactiviteSecondes ALORS
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RevoquerSession(a_IdSession, "Expiration pour inactivité")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 6. MISE À JOUR DE LA DERNIÈRE ACTIVITÉ
+      // =============================================================================
+      
+      l_DonneesModification.ID_Session				= a_IdSession
+      l_DonneesModification.DateDerniereActiviteEpoch	= l_MaintenantEpoch
+      
+      SI a_AdresseIP <> "" ALORS
+      	l_DonneesModification.DerniereIP = a_AdresseIP
+      FIN
+      
+      SI a_UserAgent <> "" ALORS
+      	l_DonneesModification.DernierUserAgent = a_UserAgent
+      FIN
+      
+      l_EnregistrementSession.m_json = VariantVersJSON(l_DonneesModification)
+      
+      l_EnregistrementSession.Modifier()
+      
+      libérer l_EnregistrementSession
+      
+      RENVOYER Vrai
+      
+     type : 458752
+   -
+     name : RenouvelerSession
+     procedure_id : 1923064511507491375
+     type_code : 12
+     code : |1+
+      
+      
+      
+      
+      // =============================================================================
+      // Méthode : RenouvelerSession
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Utilise un Refresh Token valide pour :
+      //   - vérifier la session,
+      //   - effectuer une rotation du Refresh Token,
+      //   - générer un nouvel Access Token.
+      //
+      // Aucun mot de passe n'est redemandé.
+      // =============================================================================
+      PROCÉDURE RenouvelerSession(...
+      a_RefreshToken					est une chaîne, ...
+      a_AdresseIP						est une chaîne, ...
+      a_UserAgent						est une chaîne, ...
+      a_JetonAccesSortant				est une chaîne, ...
+      a_NouveauRefreshTokenSortant	est une chaîne, ...
+      a_LoginSortant					est une chaîne, ...
+      a_DureeSecondesSortante			est un entier) : booléen
+      
+      LOCAL
+      	l_IdSession					est une chaîne
+      	l_RefreshHashRecu			est une chaîne
+      	
+      	l_EnregistrementSession		est un CLEnregistrement dynamique
+      	l_ConditionRecherche		est une chaîne
+      	l_JsonResultat				est une chaîne
+      	
+      	l_DonneesSession			est un Variant
+      	l_DonneesModification		est un Variant
+      	
+      	l_Login						est une chaîne
+      	l_RefreshHashStocke			est une chaîne
+      	
+      	l_MaintenantEpoch			est un entier sur 8 octets
+      	l_DerniereActiviteEpoch		est un entier sur 8 octets
+      	l_ExpirationAbsolueEpoch	est un entier sur 8 octets
+      	
+      	l_NouveauSecret				est une chaîne
+      	l_NouveauRefresh			est une chaîne
+      	l_NouveauRefreshHash		est une chaîne
+      	
+      	l_CompteurRotation			est un entier sur 8 octets
+      	
+      	// =============================================================================
+      	// 1. EXTRACTION DE L'ID DE SESSION
+      	// =============================================================================
+      	
+      l_IdSession = ExtraitChaîne(a_RefreshToken, 1, ".")
+      
+      SI l_IdSession = EOT OU l_IdSession = "" ALORS
+      	
+      	_Journaliser("Refresh Token malformé.", "SECURITE")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      SI ExtraitChaîne(a_RefreshToken, 2, ".") = EOT ALORS
+      	
+      	_Journaliser("Refresh Token incomplet.", "SECURITE")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 2. CALCUL DE L'EMPREINTE DU TOKEN REÇU
+      // =============================================================================
+      
+      l_RefreshHashRecu		= _HacherJeton(a_RefreshToken)
+      
+      // =============================================================================
+      // 3. CHARGEMENT DE LA SESSION
+      // =============================================================================
+      
+      l_EnregistrementSession	= allouer un CLEnregistrement()
+      
+      l_EnregistrementSession <= m_Base.m_Table[m_NomTableSessions]
+      
+      l_ConditionRecherche = ChaîneConstruit(...
+      "ID_Session = '%1'", ...
+      Remplace(l_IdSession, "'", "''"))
+      
+      l_EnregistrementSession.Charger("", l_ConditionRecherche, Vrai)
+      
+      l_JsonResultat = SansEspace(l_EnregistrementSession.m_json)
+      
+      SI l_JsonResultat = "" OU ...
+      	l_JsonResultat	= "{}" OU ...
+      	l_JsonResultat	= "null" ALORS
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      l_DonneesSession = JSONVersVariant(l_JsonResultat)
+      
+      // =============================================================================
+      // 4. SESSION RÉVOQUÉE ?
+      // =============================================================================
+      
+      SI Val(l_DonneesSession.Revoquee) = 1 ALORS
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 5. COMPARAISON DU REFRESH TOKEN
+      // =============================================================================
+      
+      l_RefreshHashStocke = "" + l_DonneesSession.RefreshHash
+      
+      SI l_RefreshHashStocke <> l_RefreshHashRecu ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"Refresh Token invalide ou déjà remplacé [Session: %1].", ...
+      	l_IdSession), ...
+      	"SECURITE")
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 6. CONTRÔLE DE L'UTILISATEUR
+      // =============================================================================
+      
+      l_Login = "" + l_DonneesSession.LoginUtilisateur
+      
+      SI PAS EstUtilisateurActif(l_Login) ALORS
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RevoquerSession(l_IdSession, "Utilisateur désactivé")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 7. CONTRÔLE DES EXPIRATIONS DE SESSION
+      // =============================================================================
+      
+      l_MaintenantEpoch			= DateHeureVersEpoch(DateHeureSys())
+      l_DerniereActiviteEpoch		= Val(l_DonneesSession.DateDerniereActiviteEpoch)
+      l_ExpirationAbsolueEpoch	= Val(l_DonneesSession.DateExpirationAbsolueEpoch)
+      
+      SI l_MaintenantEpoch > l_ExpirationAbsolueEpoch ALORS
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RevoquerSession(l_IdSession, "Expiration absolue")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      SI (l_MaintenantEpoch - l_DerniereActiviteEpoch) > ...
+      	(m_DureeSessionInactiviteJours * 86400) ALORS
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RevoquerSession(l_IdSession, "Expiration pour inactivité")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // =============================================================================
+      // 8. ROTATION DU REFRESH TOKEN
+      // =============================================================================
+      
+      l_NouveauSecret									= _GenererSecretAleatoire()
+      
+      l_NouveauRefresh								= l_IdSession + "." + l_NouveauSecret
+      
+      l_NouveauRefreshHash							= _HacherJeton(l_NouveauRefresh)
+      
+      l_CompteurRotation								= Val(l_DonneesSession.CompteurRotation) + 1
+      
+      l_DonneesModification.ID_Session				= l_IdSession
+      
+      l_DonneesModification.RefreshHashPrecedent		= l_RefreshHashStocke
+      l_DonneesModification.RefreshHash				= l_NouveauRefreshHash
+      
+      l_DonneesModification.DateRotationEpoch			= l_MaintenantEpoch
+      l_DonneesModification.DateDerniereActiviteEpoch	= l_MaintenantEpoch
+      
+      l_DonneesModification.CompteurRotation			= l_CompteurRotation
+      
+      l_DonneesModification.DerniereIP				= a_AdresseIP
+      l_DonneesModification.DernierUserAgent			= a_UserAgent
+      
+      l_EnregistrementSession.m_json					= VariantVersJSON(l_DonneesModification)
+      
+      SI PAS l_EnregistrementSession.Modifier() ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"Échec rotation Refresh Token [Session: %1].", ...
+      	l_IdSession), ...
+      	"CRITIQUE")
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      libérer l_EnregistrementSession
+      
+      // =============================================================================
+      // 9. NOUVEL ACCESS TOKEN
+      // =============================================================================
+      
+      a_JetonAccesSortant = GenererJeton(...
+      l_Login, ...
+      l_IdSession, ...
+      m_DureeJetonAccesMinutes)
+      
+      a_NouveauRefreshTokenSortant	= l_NouveauRefresh
+      
+      a_LoginSortant					= l_Login
+      
+      a_DureeSecondesSortante			= m_DureeJetonAccesMinutes * 60
+      
+      _Journaliser(...
+      ChaîneConstruit(...
+      "Session renouvelée pour '%1' [Session: %2 / Rotation: %3].", ...
+      l_Login, ...
+      l_IdSession, ...
+      l_CompteurRotation), ...
+      "INFO")
+      
+      RENVOYER Vrai
+      
+     type : 458752
+   -
+     name : RevoquerSession
+     procedure_id : 1923064640356605775
+     type_code : 12
+     code : |1+
+      
+      
+      
+      
+      // =============================================================================
+      // Méthode : RevoquerSession
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Invalide immédiatement une session précise.
+      // Les JWT déjà générés cessent eux aussi de fonctionner car chaque appel API
+      // contrôle l'état de la session côté serveur.
+      // =============================================================================
+      PROCÉDURE RevoquerSession(...
+      a_IdSession	est une chaîne, ...
+      a_Motif		est une chaîne	= "Déconnexion utilisateur") : booléen
+      
+      LOCAL
+      	l_EnregistrementSession	est un CLEnregistrement dynamique
+      	l_DonneesModification	est un Variant
+      	l_MaintenantEpoch		est un entier sur 8 octets
+      	
+      l_MaintenantEpoch		= DateHeureVersEpoch(DateHeureSys())
+      
+      l_EnregistrementSession	= allouer un CLEnregistrement()
+      
+      l_EnregistrementSession <= m_Base.m_Table[m_NomTableSessions]
+      
+      l_DonneesModification.ID_Session			= a_IdSession
+      l_DonneesModification.Revoquee				= 1
+      l_DonneesModification.DateRevocationEpoch	= l_MaintenantEpoch
+      l_DonneesModification.MotifRevocation		= a_Motif
+      
+      l_EnregistrementSession.m_json				= VariantVersJSON(l_DonneesModification)
+      
+      SI PAS l_EnregistrementSession.Modifier() ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"Impossible de révoquer la session '%1'.", ...
+      	a_IdSession), ...
+      	"ERREUR")
+      	
+      	libérer l_EnregistrementSession
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      libérer l_EnregistrementSession
+      
+      _Journaliser(...
+      ChaîneConstruit(...
+      "Session '%1' révoquée : %2", ...
+      a_IdSession, ...
+      a_Motif), ...
+      "SECURITE")
+      
+      RENVOYER Vrai
+      
+     type : 458752
+   -
+     name : RevoquerToutesSessionsUtilisateur
+     procedure_id : 1923064820745274582
+     type_code : 12
+     code : |1+
+      
+      
+      
+      // =============================================================================
+      // Méthode : RevoquerToutesSessionsUtilisateur
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Déconnecte immédiatement un utilisateur de tous ses appareils.
+      // =============================================================================
+      PROCÉDURE RevoquerToutesSessionsUtilisateur(...
+      a_Login	est une chaîne, ...
+      a_Motif	est une chaîne	= "Déconnexion globale") : booléen
+      
+      LOCAL
+      	l_EnregistrementSession		est un CLEnregistrement dynamique
+      	l_JsonSessions				est une chaîne
+      	l_SessionsVariant			est un Variant
+      	l_IdSession					est une chaîne
+      	
+      SI PAS m_Base.m_Table[m_NomTableSessions]..Existe ALORS
+      	RENVOYER Faux
+      FIN
+      
+      l_EnregistrementSession = allouer un CLEnregistrement()
+      
+      l_EnregistrementSession <= m_Base.m_Table[m_NomTableSessions]
+      
+      // Lecture de toutes les sessions appartenant à l'utilisateur.
+      l_EnregistrementSession.ChargerCollection(...
+      "LoginUtilisateur", ...
+      a_Login, ...
+      "", ...
+      Vrai)
+      
+      l_JsonSessions = SansEspace(l_EnregistrementSession.m_json)
+      
+      libérer l_EnregistrementSession
+      
+      SI l_JsonSessions = "" OU ...
+      	l_JsonSessions	= "[]" OU ...
+      	l_JsonSessions	= "null" ALORS
+      	
+      	// Aucune session active n'est également considéré comme un succès.
+      	RENVOYER Vrai
+      	
+      FIN
+      
+      QUAND EXCEPTION DANS
+      	
+      	l_SessionsVariant = JSONVersVariant(l_JsonSessions)
+      	
+      	POUR TOUT l_Session DE l_SessionsVariant
+      		
+      		l_IdSession = "" + l_Session.ID_Session
+      		
+      		SI l_IdSession <> "" ET Val(l_Session.Revoquee) = 0 ALORS
+      			RevoquerSession(l_IdSession, a_Motif)
+      		FIN
+      		
+      	FIN
+      	
+      FAIRE
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"Erreur pendant la révocation globale des sessions de '%1'.", ...
+      	a_Login), ...
+      	"ERREUR", ...
+      	ExceptionInfo(errComplet))
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      RENVOYER Vrai
+      
+     type : 458752
+   -
+     name : _ModifierEtatUtilisateur
+     procedure_id : 1923064941004452516
+     type_code : 12
+     code : |1+
+      
+      
+      
+      
+      // =============================================================================
+      // Méthode : _ModifierEtatUtilisateur
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Modifie l'état actif/inactif d'un utilisateur sans connaître à l'avance
+      // le nom exact de la clé primaire.
+      // =============================================================================
+      PROCÉDURE PRIVÉE _ModifierEtatUtilisateur(...
+      a_Login	est une chaîne, ...
+      a_Actif	est un booléen) : booléen
+      
+      LOCAL
+      	l_EnregistrementUtilisateur	est un CLEnregistrement dynamique
+      	
+      	l_ConditionRecherche		est une chaîne
+      	l_JsonResultat				est une chaîne
+      	
+      	l_DonneesUtilisateur		est un Variant
+      	l_DonneesModification		est un Variant
+      	
+      	l_NomCleUnique				est une chaîne
+      	l_ValeurCleUnique			est une chaîne
+      	
+      l_EnregistrementUtilisateur = allouer un CLEnregistrement()
+      
+      l_EnregistrementUtilisateur <= m_Base.m_Table[m_NomTableUtilisateurs]
+      
+      l_ConditionRecherche = ChaîneConstruit(...
+      "%1 = '%2'", ...
+      m_RubriqueLogin, ...
+      Remplace(a_Login, "'", "''"))
+      
+      l_EnregistrementUtilisateur.Charger("", l_ConditionRecherche, Vrai)
+      
+      l_JsonResultat = SansEspace(l_EnregistrementUtilisateur.m_json)
+      
+      SI l_JsonResultat = "" OU ...
+      	l_JsonResultat	= "{}" OU ...
+      	l_JsonResultat	= "null" ALORS
+      	
+      	libérer l_EnregistrementUtilisateur
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      l_DonneesUtilisateur	= JSONVersVariant(l_JsonResultat)
+      
+      l_NomCleUnique			= l_EnregistrementUtilisateur.m_CleUnique
+      
+      SI l_NomCleUnique = "" ALORS
+      	
+      	libérer l_EnregistrementUtilisateur
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      l_ValeurCleUnique						= "" + l_DonneesUtilisateur[l_NomCleUnique]
+      
+      l_DonneesModification[l_NomCleUnique]	= l_ValeurCleUnique
+      
+      SI a_Actif ALORS
+      	l_DonneesModification[m_RubriqueActifUtilisateur] = 1
+      SINON
+      	l_DonneesModification[m_RubriqueActifUtilisateur] = 0
+      FIN
+      
+      l_EnregistrementUtilisateur.m_json = VariantVersJSON(l_DonneesModification)
+      
+      SI PAS l_EnregistrementUtilisateur.Modifier() ALORS
+      	
+      	libérer l_EnregistrementUtilisateur
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      libérer l_EnregistrementUtilisateur
+      
+      RENVOYER Vrai
+      
+     type : 458752
+   -
+     name : BloquerUtilisateur
+     procedure_id : 1923065301781723313
+     type_code : 12
+     code : |1+
+      
+      
+      
+      // =============================================================================
+      // Méthode : BloquerUtilisateur
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Désactive le compte puis invalide immédiatement toutes ses sessions.
+      // =============================================================================
+      PROCÉDURE BloquerUtilisateur(...
+      a_Login	est une chaîne, ...
+      a_Motif	est une chaîne	= "Compte bloqué par l'administrateur") : booléen
+      
+      SI PAS _ModifierEtatUtilisateur(a_Login, Faux) ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit("Impossible de bloquer l'utilisateur '%1'.", a_Login), ...
+      	"ERREUR")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      // Toutes les sessions de tous les appareils deviennent immédiatement invalides.
+      RevoquerToutesSessionsUtilisateur(a_Login, a_Motif)
+      
+      _Journaliser(...
+      ChaîneConstruit("Utilisateur '%1' bloqué.", a_Login), ...
+      "SECURITE")
+      
+      RENVOYER Vrai
+      
+     type : 458752
+   -
+     name : AutoriserUtilisateur
+     procedure_id : 1923066087760790659
+     type_code : 12
+     code : |1+
+      
+      
+      
+      // =============================================================================
+      // Méthode : AutoriserUtilisateur
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Réactive un utilisateur.
+      //
+      // IMPORTANT :
+      // Les anciennes sessions restent révoquées.
+      // L'utilisateur devra effectuer une nouvelle authentification.
+      // =============================================================================
+      PROCÉDURE AutoriserUtilisateur(a_Login est une chaîne) : booléen
+      
+      SI PAS _ModifierEtatUtilisateur(a_Login, Vrai) ALORS
+      	
+      	_Journaliser(...
+      	ChaîneConstruit(...
+      	"Impossible de réactiver l'utilisateur '%1'.", ...
+      	a_Login), ...
+      	"ERREUR")
+      	
+      	RENVOYER Faux
+      	
+      FIN
+      
+      _Journaliser(...
+      ChaîneConstruit(...
+      "Utilisateur '%1' réactivé. Une nouvelle connexion sera nécessaire.", ...
+      a_Login), ...
+      "INFO")
+      
+      RENVOYER Vrai
+      
      type : 458752
   procedure_templates : []
   property_templates : []
