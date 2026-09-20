@@ -719,8 +719,8 @@ class :
       
       QUAND EXCEPTION DANS
       	l_JsonEntrant = JSONVersVariant(a_SocketRecu.m_CorpsRequete)
-      	l_Identifiant = SansEspace(l_JsonEntrant.identifiant)
-      	l_MotDePasse  = l_JsonEntrant.mot_de_passe
+      	l_Identifiant = SansEspace(l_JsonEntrant.login)
+      	l_MotDePasse  = l_JsonEntrant.password
       FAIRE
       	a_SocketRecu.m_CodeReponse   = "400 Bad Request"
       	a_SocketRecu.m_extension     = ".json"

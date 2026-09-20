@@ -165,11 +165,7 @@ class :
       // 2. INSTANCIATION DYNAMIQUE (ISOLATION STRICTE MULTITHREAD)
       // ------------------------------------------------------------------------------
       l_EnregistrementCourant = allouer un CLEnregistrement()
-      l_EnregistrementCourant.Init(m_NomTableUtilisateurs)
-      l_EnregistrementCourant.m_NomTable	= m_NomTableUtilisateurs
-      
-      // Définition de la clé de référence sur la rubrique configurée
-      l_EnregistrementCourant.m_CleUnique	= m_RubriqueLogin
+      l_EnregistrementCourant <= m_Base.m_Table[m_NomTableUtilisateurs]
       
       // ------------------------------------------------------------------------------
       // 3. PRÉPARATION DU FILTRE SQL ET HACHAGE DU MOT DE PASSE REÇU
