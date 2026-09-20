@@ -57,16 +57,14 @@ class :
      name : Destructeur
      procedure_id : 1465886919539391725
      type_code : 28
-     code : |1-
+     code : |1+
       procédure Destructeur()
-      
-      arret()
      type : 655360
    -
      name : MessageRecu
-     procedure_id : 1918188525328362245
+     procedure_id : 1923031951363129942
      type_code : 12
-     code : |1-
+     code : |1+
       PROCÉDURE MessageRecu(a_SocketRecu est CLCanalSocket)
       
       LOCAL
@@ -92,63 +90,68 @@ class :
       FIN
       
       // Résolution préventive des métadonnées pour le cloisonnement et les journaux
-      l_NomVHost  = a_SocketRecu.m_NomHote
-      l_UserAgent = a_SocketRecu.m_UserAgent
+      l_NomVHost	= a_SocketRecu.m_NomHote
+      l_UserAgent	= a_SocketRecu.m_UserAgent
       
       // ==============================================================================
-      // AIGUILLAGE DU ROUTEUR REST (Position = 1 stricte WinDev 25)
+      // AIGUILLAGE DU ROUTEUR REST (Position = 1 stricte WinDev 25 via l'opérateur [=)
       // ==============================================================================
+      // L'utilisation de SELON avec l'opérateur "[=" (commence par) est plus rapide 
+      // qu'une cascade de fonctions Position(). Le WLangage gère le "[=" sans casse par défaut.
       
-      // Route 0 : Challenge ACME Let's Encrypt (Priorité absolue pour le SSL)
-      SI Position(l_UriDemande, "/.well-known/acme-challenge/", 1, SansCasse) = 1 ALORS
-      	_TraiterRequeteAcmeChallenge(a_SocketRecu)
-      	
-      // Route 0.1 : Authentification Login (Délivre le JWT sans vérification préalable)
-      SINON SI Position(l_UriDemande, "/api/v1/auth/login", 1, SansCasse) = 1 ALORS
-      	_TraiterAuthentificationLogin(a_SocketRecu)
-      	
-      // Route 1 : Supervision Système (Protégée par token ou clé test)
-      SINON SI Position(l_UriDemande, "/api/v1/monitoring/systeme", 1, SansCasse) = 1 ALORS
-      	SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
-      		a_SocketRecu.m_CodeReponse   = "401 Unauthorized"
-      		a_SocketRecu.m_extension     = ".json"
-      		a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Accès non autorisé.""}"
-      		SI m_Journal <> Null ALORS
-      			m_Journal.EnregistrerErreur(ChaîneConstruit("Tentative d'accès non autorisée au monitoring système depuis l'IP %1", a_SocketRecu.m_AdresseIp), l_NomVHost, "SECURITE")
+      SELON l_UriDemande
+      
+      	// Route 0 : Challenge ACME Let's Encrypt (Priorité absolue pour le SSL)
+      	CAS [= "/.well-known/acme-challenge/"
+      		_TraiterRequeteAcmeChallenge(a_SocketRecu)
+      		
+      	// Route 0.1 : Authentification Login (Délivre le JWT sans vérification préalable)
+      	CAS [= "/api/v1/auth/login"
+      		_TraiterAuthentificationLogin(a_SocketRecu)
+      		
+      	// Route 1 : Supervision Système (Protégée par token ou clé test)
+      	CAS [= "/api/v1/monitoring/systeme"
+      		SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
+      			a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      			a_SocketRecu.m_extension		= ".json"
+      			a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Accès non autorisé.""}"
+      			SI m_Journal <> Null ALORS
+      				m_Journal.EnregistrerErreur(ChaîneConstruit("Tentative d'accès non autorisée au monitoring système depuis l'IP %1", a_SocketRecu.m_AdresseIp), l_NomVHost, "SECURITE")
+      			FIN
+      		SINON
+      			_TraiterRequeteMonitoring(a_SocketRecu)
       		FIN
-      	SINON
-      		_TraiterRequeteMonitoring(a_SocketRecu)
-      	FIN
-      	
-      // Route 2 : Données REST et ORM HFSQL (Protégée par token ou clé test)
-      SINON SI Position(l_UriDemande, "/api/v1/data/", 1, SansCasse) = 1 ALORS
-      	SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
-      		a_SocketRecu.m_CodeReponse   = "401 Unauthorized"
-      		a_SocketRecu.m_extension     = ".json"
-      		a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Session invalide ou jeton absent.""}"
-      		SI m_Journal <> Null ALORS
-      			m_Journal.EnregistrerErreur(ChaîneConstruit("Rejet de sécurité 401 sur l'API REST pour l'URI '%1' (IP: %2)", l_UriDemande, a_SocketRecu.m_AdresseIp), l_NomVHost, "SECURITE")
+      		
+      	// Route 2 : Données REST et ORM HFSQL (Protégée par token ou clé test)
+      	CAS [= "/api/v1/data/"
+      		SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
+      			a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      			a_SocketRecu.m_extension		= ".json"
+      			a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Session invalide ou jeton absent.""}"
+      			SI m_Journal <> Null ALORS
+      				m_Journal.EnregistrerErreur(ChaîneConstruit("Rejet de sécurité 401 sur l'API REST pour l'URI '%1' (IP: %2)", l_UriDemande, a_SocketRecu.m_AdresseIp), l_NomVHost, "SECURITE")
+      			FIN
+      		SINON
+      			_TraiterRequeteApi(a_SocketRecu)
       		FIN
-      	SINON
-      		_TraiterRequeteApi(a_SocketRecu)
-      	FIN
-      	
-      // Route 3 : Requêtes SQL Directes (Protégée par token ou clé test)
-      SINON SI Position(l_UriDemande, "/api/v1/sql", 1, SansCasse) = 1 ALORS
-      	SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
-      		a_SocketRecu.m_CodeReponse   = "401 Unauthorized"
-      		a_SocketRecu.m_extension     = ".json"
-      		a_SocketRecu.m_ContenuBuffer = "{""erreur"": ""Accès SQL refusé.""}"
-      		SI m_Journal <> Null ALORS
-      			m_Journal.EnregistrerErreur(ChaîneConstruit("Rejet de sécurité 401 sur l'exécuteur SQL brut (IP: %1)", a_SocketRecu.m_AdresseIp), l_NomVHost, "SECURITE")
+      		
+      	// Route 3 : Requêtes SQL Directes (Protégée par token ou clé test)
+      	CAS [= "/api/v1/sql"
+      		SI PAS m_Securite.VerifierSecuriteRequete(a_SocketRecu) ALORS
+      			a_SocketRecu.m_CodeReponse		= "401 Unauthorized"
+      			a_SocketRecu.m_extension		= ".json"
+      			a_SocketRecu.m_ContenuBuffer	= "{""erreur"": ""Accès SQL refusé.""}"
+      			SI m_Journal <> Null ALORS
+      				m_Journal.EnregistrerErreur(ChaîneConstruit("Rejet de sécurité 401 sur l'exécuteur SQL brut (IP: %1)", a_SocketRecu.m_AdresseIp), l_NomVHost, "SECURITE")
+      			FIN
+      		SINON
+      			_ExecuterRequeteSQL(a_SocketRecu)
       		FIN
-      	SINON
-      		_ExecuterRequeteSQL(a_SocketRecu)
-      	FIN
-      	
-      // Route 4 : Fichiers Statiques et Scripts Polyglottes WWW (html, css, js, php, py, wl, etc.)
-      SINON
-      	_ObtenirFichier(a_SocketRecu)
+      		
+      	// Route 4 : Fichiers Statiques et Scripts Polyglottes WWW (html, css, js, etc.)
+      	AUTRES CAS
+      		_ObtenirFichier(a_SocketRecu)
+      		
       FIN
       
       // ==============================================================================
@@ -159,11 +162,11 @@ class :
       a_SocketRecu.GenererReponse()
       
       // Calcul de la latence d'exécution en millisecondes (Soustraction native DateHeure V25)
-      l_DureeEcoulee = DateHeureSys() - l_DateHeureDebut
-      l_LatenceMs    = l_DureeEcoulee..EnMillisecondes
+      l_DureeEcoulee	= DateHeureSys() - l_DateHeureDebut
+      l_LatenceMs		= l_DureeEcoulee..EnMillisecondes
       
       // Résolution du code statut HTTP numérique pour le monitoring
-      l_CodeStatut = Val(a_SocketRecu.m_CodeReponse)
+      l_CodeStatut	= Val(a_SocketRecu.m_CodeReponse)
       SI l_CodeStatut = 0 ALORS
       	l_CodeStatut = 200
       FIN
@@ -177,7 +180,7 @@ class :
       
       // Journalisation asynchrone type Apache dans acces_AAAAMMJJ.log
       SI m_Journal <> Null ALORS
-      	m_Journal.EnregistrerAcces(a_SocketRecu.m_AdresseIp, a_SocketRecu.m_TypeRequete, a_SocketRecu.m_UrlRecue, l_CodeStatut, l_TailleOctets, l_LatenceMs, l_UserAgent, l_NomVHost)
+      m_Journal.EnregistrerAcces(a_SocketRecu.m_AdresseIp, a_SocketRecu.m_TypeRequete, a_SocketRecu.m_UrlRecue, l_CodeStatut, l_TailleOctets, l_LatenceMs, l_UserAgent, l_NomVHost)
       FIN
      type : 458752
    -
