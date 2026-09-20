@@ -26,7 +26,7 @@ class :
       	m_MessageSocketRecu						est chaîne 
       	m_MessageSocketReponse					est chaîne 
       	m_CanalOuvert							est un booléen
-      	
+      	m_VersionHttp							est  une chaîne
       	m_UrlRecue								est une chaîne
       	m_PointDEntree							est une chaîne 		
       	m_CorpsRequete							est une chaîne 
@@ -58,46 +58,251 @@ class :
      name : Destructeur
      procedure_id : 1891211195791019186
      type_code : 28
-     code : |1+
+     code : |1-
       procédure Destructeur()
-      
      type : 655360
    -
      name : AnalyserRequete
-     procedure_id : 1891211195791084722
+     procedure_id : 1922791531976831648
      type_code : 12
-     code : |1+
-      procédure AnalyserRequete()
+     code : |1-
+      PROCÉDURE AnalyserRequete()
+      
+      // Variables locales de repérage et de découpage structurel
+      l_PositionSeparateur					est un entier
+      l_TailleSeparateur						est un entier
+      l_PositionFinLigne						est un entier
+      l_PremiereLigne							est un chaîne
+      l_PositionSeparateurSchema				est un entier
+      l_PositionPremierSlashApresHote			est un entier
+      l_PositionPointInterrogationApresHote	est un entier
+      l_PartieHote							est un chaîne
+      l_PositionInterrogation					est un entier
+      l_PositionFragment						est un entier
+      l_UrlSansParametres						est un chaîne
+      l_ValeurHote							est un chaîne
+      l_ValeurUserAgent						est un chaîne
+      l_AdresseIpTransferee					est un chaîne
+      l_TailleContenuDeclaree					est un entier
+      l_PositionAccoladeSecours				est un entier
+      l_LigneEnTeteSecours					est un chaîne
       
       QUAND EXCEPTION DANS
-      	m_EnteteRequete			= Décode(m_MessageSocketRecu[[ À Position(m_MessageSocketRecu,RC+RC)-1]],encodeURLVersUTF8)
-      	m_CorpsRequete			= Décode(m_MessageSocketRecu[[Position(m_MessageSocketRecu,RC+RC)+4 À ]],encodeURLVersUTF8)
-      	m_PositionUrl			= Position(m_EnteteRequete,"/")
-      	m_TypeRequete			= SansEspace(m_EnteteRequete[1 À m_PositionUrl-1])
-      	m_UrlRecue				= SansEspace(m_EnteteRequete[[m_PositionUrl+1 À Position(m_EnteteRequete,"HTTP",m_PositionUrl)-1]])
-      	m_PointDEntree			= Minuscule( m_UrlRecue[[  À Position(m_UrlRecue,"/")-1 ]])
       	
-      	_ExtraireParametres()
-      	
-      	// Extraction et normalisation des en-têtes clés pour les logs et le cloisonnement VHost
-      	SI m_Parametres["Host"] <> "" ALORS
-      		m_NomHote = SansEspace(m_Parametres["Host"])
-      		// Élimination du port éventuel (ex: "mondomaine.com:8080" -> "mondomaine.com")
-      		SI Position(m_NomHote, ":") > 0 ALORS
-      			m_NomHote = m_NomHote[[1 À Position(m_NomHote, ":") - 1]]
+      	// ------------------------------------------------------------------------
+      	// 1. RECHERCHE DU SÉPARATEUR DE FIN D'EN-TÊTE AVEC REPLI ROBUSTE
+      	// ------------------------------------------------------------------------
+      	// Test standard RFC : CRLF CRLF (\r\n\r\n)
+      	l_PositionSeparateur = Position(m_MessageSocketRecu, Caract(13) + Caract(10) + Caract(13) + Caract(10))
+      	SI l_PositionSeparateur > 0 ALORS
+      		l_TailleSeparateur = 4
+      	SINON
+      		// Tolérance UNIX : LF LF (\n\n)
+      		l_PositionSeparateur = Position(m_MessageSocketRecu, Caract(10) + Caract(10))
+      		SI l_PositionSeparateur > 0 ALORS
+      			l_TailleSeparateur = 2
+      		SINON
+      			// Tolérance Mac Legacy : CR CR (\r\r)
+      			l_PositionSeparateur = Position(m_MessageSocketRecu, Caract(13) + Caract(13))
+      			SI l_PositionSeparateur > 0 ALORS
+      				l_TailleSeparateur = 2
+      			FIN
       		FIN
       	FIN
       	
-      	SI m_Parametres["User-Agent"] <> "" ALORS
-      		m_UserAgent = SansEspace(m_Parametres["User-Agent"])
+      	// MECANISME DE SECOURS (Clients non conformes omettant la ligne vide avant JSON/XML)
+      	// Détection de la première ouverture de charge utile JSON ({ ou [) après un retour à la ligne
+      	SI l_PositionSeparateur <= 0 ALORS
+      		l_PositionAccoladeSecours = Position(m_MessageSocketRecu, Caract(10) + "{")
+      		SI l_PositionAccoladeSecours <= 0 ALORS
+      			l_PositionAccoladeSecours = Position(m_MessageSocketRecu, Caract(10) + "[")
+      		FIN
+      		
+      		SI l_PositionAccoladeSecours > 0 ALORS
+      			l_PositionSeparateur	= l_PositionAccoladeSecours
+      			l_TailleSeparateur		= 1
+      		FIN
       	FIN
       	
-      	SI m_AdresseIp = "" ALORS
-      		m_AdresseIp = m_AdresseClient
+      	// Si aucun en-tête ni corps n'est dissociable, la trame est corrompue
+      	SI l_PositionSeparateur <= 0 ALORS
+      		m_EnteteRequete	= ""
+      		m_CorpsRequete	= ""
+      		SI m_Journal <> Null ALORS
+      			m_Journal.EnregistrerErreur("Requête HTTP invalide : séparateur d'en-têtes introuvable.", m_NomHote, "AVERTISSEMENT", "")
+      		FIN
+      		RETOUR
       	FIN
+      	
+      	// Isolement strict des blocs En-tête et Corps
+      	m_EnteteRequete = m_MessageSocketRecu[[1 À l_PositionSeparateur - 1]]
+      	
+      	// ------------------------------------------------------------------------
+      	// 2. EXTRACTION ET NORMALISATION DES EN-TÊTES CLIENTS
+      	// ------------------------------------------------------------------------
+      	// Exécuté immédiatement pour récupérer le Content-Length avant d'extraire le corps
+      	_ExtraireParametres()
+      	
+      	// ------------------------------------------------------------------------
+      	// 3. EXTRACTION CALIBRÉE DU CORPS (CONTENT-LENGTH)
+      	// ------------------------------------------------------------------------
+      	// Si un Content-Length est fourni, on lit exactement le nombre d'octets prévus
+      	// Cela évite la pollution par des octets traînants (socket Keep-Alive ou résidus TCP)
+      	l_TailleContenuDeclaree = 0
+      	SI m_Parametres["content-length"] <> "" ALORS
+      		l_TailleContenuDeclaree = Val(SansEspace(m_Parametres["content-length"]))
+      	FIN
+      	
+      	SI l_TailleContenuDeclaree > 0 ALORS
+      		m_CorpsRequete = m_MessageSocketRecu[[l_PositionSeparateur + l_TailleSeparateur À (l_PositionSeparateur + l_TailleSeparateur + l_TailleContenuDeclaree - 1)]]
+      	SINON
+      		m_CorpsRequete = m_MessageSocketRecu[[l_PositionSeparateur + l_TailleSeparateur À ]]
+      	FIN
+      	
+      	// ------------------------------------------------------------------------
+      	// 4. EXTRACTION ET NORMALISATION DE LA REQUEST-LINE (LIGNE 1)
+      	// ------------------------------------------------------------------------
+      	// Ignore les lignes vides initiales éventuelles (tolérance RFC 7230 §3.5)
+      	l_PremiereLigne = ""
+      	POUR TOUTE CHAÎNE l_LigneEnTeteSecours DE m_EnteteRequete SEPAREE PAR Caract(10)
+      		l_LigneEnTeteSecours	= Remplace(l_LigneEnTeteSecours, Caract(13), "")
+      		l_LigneEnTeteSecours	= SansEspace(l_LigneEnTeteSecours)
+      		SI l_LigneEnTeteSecours <> "" ALORS
+      			l_PremiereLigne = l_LigneEnTeteSecours
+      			SORTIR
+      		FIN
+      	FIN
+      	
+      	SI l_PremiereLigne = "" ALORS
+      		RETOUR
+      	FIN
+      	
+      	// Normalisation des séparateurs internes (remplacement des espaces multiples et tabulations)
+      	l_PremiereLigne = Remplace(l_PremiereLigne, Caract(9), " ")
+      	TANTQUE Position(l_PremiereLigne, "  ") > 0
+      		l_PremiereLigne = Remplace(l_PremiereLigne, "  ", " ")
+      	FIN
+      	
+      	m_TypeRequete				= Majuscule(SansEspace(ExtraitChaîne(l_PremiereLigne, 1, " ")))
+      	m_UrlRecue					= SansEspace(ExtraitChaîne(l_PremiereLigne, 2, " "))
+      	m_VersionHttp				= Majuscule(SansEspace(ExtraitChaîne(l_PremiereLigne, 3, " ")))
+      	
+      	// ------------------------------------------------------------------------
+      	// 5. NORMALISATION DE L'URI (ABSOLUTE-FORM VS ORIGIN-FORM)
+      	// ------------------------------------------------------------------------
+      	l_PositionSeparateurSchema	= Position(m_UrlRecue, "://")
+      	SI l_PositionSeparateurSchema > 0 ALORS
+      		l_PositionPremierSlashApresHote			= Position(m_UrlRecue, "/", l_PositionSeparateurSchema + 3)
+      		l_PositionPointInterrogationApresHote	= Position(m_UrlRecue, "?", l_PositionSeparateurSchema + 3)
+      		
+      		SI l_PositionPremierSlashApresHote > 0 ALORS
+      			SI m_NomHote = "" ALORS
+      				l_PartieHote = m_UrlRecue[[l_PositionSeparateurSchema + 3 À l_PositionPremierSlashApresHote - 1]]
+      				SI Position(l_PartieHote, ":") > 0 ALORS
+      					m_NomHote = l_PartieHote[[1 À Position(l_PartieHote, ":") - 1]]
+      				SINON
+      					m_NomHote = l_PartieHote
+      				FIN
+      			FIN
+      			m_UrlRecue = m_UrlRecue[[l_PositionPremierSlashApresHote À ]]
+      			
+      		SINON SI l_PositionPointInterrogationApresHote > 0 ALORS
+      			SI m_NomHote = "" ALORS
+      				l_PartieHote = m_UrlRecue[[l_PositionSeparateurSchema + 3 À l_PositionPointInterrogationApresHote - 1]]
+      				SI Position(l_PartieHote, ":") > 0 ALORS
+      					m_NomHote = l_PartieHote[[1 À Position(l_PartieHote, ":") - 1]]
+      				SINON
+      					m_NomHote = l_PartieHote
+      				FIN
+      			FIN
+      			m_UrlRecue = "/" + m_UrlRecue[[l_PositionPointInterrogationApresHote À ]]
+      			
+      		SINON
+      			SI m_NomHote = "" ALORS
+      				l_PartieHote = m_UrlRecue[[l_PositionSeparateurSchema + 3 À ]]
+      				SI Position(l_PartieHote, ":") > 0 ALORS
+      					m_NomHote = l_PartieHote[[1 À Position(l_PartieHote, ":") - 1]]
+      				SINON
+      					m_NomHote = l_PartieHote
+      				FIN
+      			FIN
+      			m_UrlRecue = "/"
+      		FIN
+      	FIN
+      	
+      	// Élimination des fragments côté serveur (#)
+      	l_PositionFragment = Position(m_UrlRecue, "#")
+      	SI l_PositionFragment > 0 ALORS
+      		m_UrlRecue = m_UrlRecue[[1 À l_PositionFragment - 1]]
+      	FIN
+      	
+      	// Sécurisation : l'URL relative doit obligatoirement commencer par un slash
+      	SI m_UrlRecue = "" ALORS
+      		m_UrlRecue = "/"
+      	SINON SI m_UrlRecue[[1]] <> "/" ALORS
+      		m_UrlRecue = "/" + m_UrlRecue
+      	FIN
+      	
+      	// ------------------------------------------------------------------------
+      	// 6. EXTRACTION DU POINT D'ENTRÉE DU ROUTEUR RaaD
+      	// ------------------------------------------------------------------------
+      	l_PositionInterrogation = Position(m_UrlRecue, "?")
+      	SI l_PositionInterrogation > 0 ALORS
+      		l_UrlSansParametres = m_UrlRecue[[1 À l_PositionInterrogation - 1]]
+      	SINON
+      		l_UrlSansParametres = m_UrlRecue
+      	FIN
+      	
+      	SI l_UrlSansParametres[[1]] = "/" ALORS
+      		l_UrlSansParametres = l_UrlSansParametres[[2 À ]]
+      	FIN
+      	
+      	SI Position(l_UrlSansParametres, "/") > 0 ALORS
+      		m_PointDEntree = Minuscule(l_UrlSansParametres[[1 À Position(l_UrlSansParametres, "/") - 1]])
+      	SINON
+      		m_PointDEntree = Minuscule(l_UrlSansParametres)
+      	FIN
+      	
+      	// ------------------------------------------------------------------------
+      	// 7. AFFECTATION DES VARIABLES D'ENVIRONNEMENT CLIENT
+      	// ------------------------------------------------------------------------
+      	// Résolution de l'Hôte (priorité à l'en-tête HTTP Host si absent de la Request-Line)
+      	l_ValeurHote = SansEspace(m_Parametres["host"])
+      	SI l_ValeurHote <> "" ALORS
+      		SI Position(l_ValeurHote, ":") > 0 ALORS
+      			m_NomHote = l_ValeurHote[[1 À Position(l_ValeurHote, ":") - 1]]
+      		SINON
+      			m_NomHote = l_ValeurHote
+      		FIN
+      	FIN
+      	
+      	// Résolution du User-Agent
+      	l_ValeurUserAgent = SansEspace(m_Parametres["user-agent"])
+      	SI l_ValeurUserAgent <> "" ALORS
+      		m_UserAgent = l_ValeurUserAgent
+      	FIN
+      	
+      	// Résolution de l'IP avec support des proxys et répartiteurs de charge
+      	l_AdresseIpTransferee = SansEspace(m_Parametres["x-forwarded-for"])
+      	SI l_AdresseIpTransferee = "" ALORS
+      		l_AdresseIpTransferee = SansEspace(m_Parametres["x-real-ip"])
+      	FIN
+      	
+      	SI l_AdresseIpTransferee <> "" ALORS
+      		SI Position(l_AdresseIpTransferee, ",") > 0 ALORS
+      			m_AdresseIp = SansEspace(ExtraitChaîne(l_AdresseIpTransferee, 1, ","))
+      		SINON
+      			m_AdresseIp = l_AdresseIpTransferee
+      		FIN
+      	SINON
+      		SI m_AdresseIp = "" ALORS
+      			m_AdresseIp = m_AdresseClient
+      		FIN
+      	FIN
+      	
       FAIRE
       	SI m_Journal <> Null ALORS
-      		m_Journal.EnregistrerErreur("Erreur lors de l'analyse de la requête HTTP brute.", m_NomHote, "AVERTISSEMENT", ExceptionInfo(errComplet))
+      		m_Journal.EnregistrerErreur("Échec critique lors de l'analyse de la requête HTTP.", m_NomHote, "CRITIQUE", ExceptionInfo(errComplet))
       	FIN
       FIN
      type : 458752

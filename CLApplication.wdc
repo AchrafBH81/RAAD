@@ -104,7 +104,7 @@ class :
       	_TraiterRequeteAcmeChallenge(a_SocketRecu)
       	
       // Route 0.1 : Authentification Login (Délivre le JWT sans vérification préalable)
-      SINON SI Position(l_UriDemande, "/api/auth/login", 1, SansCasse) = 1 ALORS
+      SINON SI Position(l_UriDemande, "/api/v1/auth/login", 1, SansCasse) = 1 ALORS
       	_TraiterAuthentificationLogin(a_SocketRecu)
       	
       // Route 1 : Supervision Système (Protégée par token ou clé test)
