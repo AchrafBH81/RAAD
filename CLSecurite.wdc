@@ -791,33 +791,80 @@ class :
      procedure_id : 1917953959983257060
      type_code : 12
      code : |1+
-      // ==============================================================================
+      // =============================================================================
       // Méthode : _EncoderBase64Url
-      // Classe  : CLSecurite (Procédure locale privée)
-      // Rôle    : Encodage Base64Url sans caractères perturbateurs d'URL (+, /, =)
-      //           selon la norme RFC 7519 (JWT)
-      // Entrée  : a_Donnees (Polymorphe : accepte indifféremment une chaîne ou un buffer)
-      // Version : WinDev 25 Strict
-      // ==============================================================================
+      // Classe  : CLSecurite
+      //
+      // Rôle :
+      // Encode une chaîne ou un buffer au format Base64URL compatible JWT.
+      //
+      // IMPORTANT :
+      // encodeBASE64NoCR est obligatoire pour un JWT HTTP.
+      // Aucun CR/LF ne doit apparaître dans Authorization: Bearer.
+      // =============================================================================
       PROCÉDURE PRIVÉE _EncoderBase64Url(a_Donnees) : chaîne
       
       LOCAL
       	l_TamponBuffer	est un buffer
       	l_ChaineBase64	est une chaîne
       	
-      // 1. Affectation directe WLangage (transtypage automatique en buffer binaire)
-      // Fonctionne à 100% que a_Donnees soit une chaîne ANSI/UTF-8 ou un buffer binaire
+      	// =============================================================================
+      	// 1. CONVERSION EN BUFFER
+      	// =============================================================================
+      	
       l_TamponBuffer	= a_Donnees
       
-      // 2. Encodage Base64 standard
-      l_ChaineBase64	= Encode(l_TamponBuffer, encodeBASE64)
+      // =============================================================================
+      // 2. BASE64 SANS RETOUR CHARIOT
+      //
+      // NE PAS utiliser encodeBASE64 ici.
+      //
+      // encodeBASE64NoCR évite l'introduction de CR/LF dans :
+      //   - JWT
+      //   - Refresh Token
+      //   - signatures
+      // =============================================================================
       
-      // 3. Transformation en Base64Url (suppression des caractères d'échappement URL)
-      l_ChaineBase64	= Remplace(l_ChaineBase64, "+", "-")
-      l_ChaineBase64	= Remplace(l_ChaineBase64, "/", "_")
-      l_ChaineBase64	= Remplace(l_ChaineBase64, "=", "")
+      l_ChaineBase64	= Encode(...
+      l_TamponBuffer, ...
+      encodeBASE64NoCR)
       
-      // 4. Renvoi de la chaîne sans espaces résiduels
+      // =============================================================================
+      // 3. TRANSFORMATION BASE64 -> BASE64URL
+      // =============================================================================
+      
+      l_ChaineBase64 = Remplace(...
+      l_ChaineBase64, ...
+      "+", ...
+      "-")
+      
+      l_ChaineBase64 = Remplace(...
+      l_ChaineBase64, ...
+      "/", ...
+      "_")
+      
+      l_ChaineBase64 = Remplace(...
+      l_ChaineBase64, ...
+      "=", ...
+      "")
+      
+      // =============================================================================
+      // 4. SÉCURITÉ SUPPLÉMENTAIRE
+      //
+      // Normalement encodeBASE64NoCR suffit.
+      // On élimine malgré tout tout CR/LF résiduel.
+      // =============================================================================
+      
+      l_ChaineBase64 = Remplace(...
+      l_ChaineBase64, ...
+      Caract(13), ...
+      "")
+      
+      l_ChaineBase64 = Remplace(...
+      l_ChaineBase64, ...
+      Caract(10), ...
+      "")
+      
       RENVOYER SansEspace(l_ChaineBase64)
      type : 458752
    -

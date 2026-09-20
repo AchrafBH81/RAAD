@@ -71,7 +71,6 @@ class :
       // Variables locales de repérage et de découpage structurel
       l_PositionSeparateur					est un entier
       l_TailleSeparateur						est un entier
-      l_PositionFinLigne						est un entier
       l_PremiereLigne							est un chaîne
       l_PositionSeparateurSchema				est un entier
       l_PositionPremierSlashApresHote			est un entier
