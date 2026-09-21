@@ -432,7 +432,7 @@ class :
       procédure privée _LireEnregistrements(a_SocketRecu est CLCanalSocket, a_IgnorerCache est un booléen = Faux)
       
       LOCAL
-      l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
+      	l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
       
       l_EnregistrementCourant <= m_Base.m_Table[a_SocketRecu.m_Parametres["table"]]
       
