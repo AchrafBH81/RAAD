@@ -432,7 +432,7 @@ class :
       procédure privée _LireEnregistrements(a_SocketRecu est CLCanalSocket, a_IgnorerCache est un booléen = Faux)
       
       LOCAL
-      	l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
+      l_EnregistrementCourant est un CLenregistrement dynamique = allouer un CLenregistrement
       
       l_EnregistrementCourant <= m_Base.m_Table[a_SocketRecu.m_Parametres["table"]]
       
@@ -602,8 +602,8 @@ class :
       	l_CheminPur = a_SocketRecu.m_UrlRecue
       FIN
       
-      a_SocketRecu.m_Parametres["table"]  = ExtraitChaîne(l_CheminPur, 4, "/")
-      a_SocketRecu.m_Parametres["valkey"] = ExtraitChaîne(l_CheminPur, 5, "/")
+      a_SocketRecu.m_Parametres["table"]  = ExtraitChaîne(l_CheminPur, 5, "/")
+      a_SocketRecu.m_Parametres["valkey"] = ExtraitChaîne(l_CheminPur, 6, "/")
       
       l_NomTable  = a_SocketRecu.m_Parametres["table"]
       l_NomEspace = (a_SocketRecu.m_Parametres["espace"] <> "" ? a_SocketRecu.m_Parametres["espace"] SINON m_Base.m_connexion..BaseDeDonnées)
@@ -626,6 +626,7 @@ class :
       			SI a_SocketRecu.m_Parametres["valkey"] = "" OU a_SocketRecu.m_Parametres["valkey"] = eot ALORS
       				_LireEnregistrements(a_SocketRecu, l_IgnorerCache)
       			SINON
+      
       				_LireEnregistrement(a_SocketRecu, l_IgnorerCache)
       			FIN
       			

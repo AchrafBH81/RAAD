@@ -871,7 +871,7 @@ class :
      name : _Journaliser
      procedure_id : 1918185660585033179
      type_code : 12
-     code : |1-
+     code : |1+
       /// <summary>
       /// Passerelle interne de journalisation de sécurité vers le moteur asynchrone RaaD.
       /// </summary>
@@ -881,13 +881,13 @@ class :
       	m_Journal.EnregistrerErreur(a_Message, "", a_NiveauGravite, a_ContexteException)
       FIN
       
-      // ==============================================================================
-      // Méthode : InitialiserSocleSecurite
-      // Classe  : CLSecurite
-      // Rôle    : 1. Vérifie si la table existe dans le registre ORM m_Base.m_Table.
-      //           2. Si absente, exécute le CREATE TABLE et référence le prototype dans m_Base.
-      //           3. Si la table est vide, crée le compte par défaut via l'ORM en alimentant m_json.
-      // Version : WinDev 25 Strict
+     type : 458752
+   -
+     name : InitialiserSocleSecurite
+     procedure_id : 1923060972453680991
+     type_code : 12
+     code : |1-
+      
       // ========================================================// =============================================================================
       // Méthode : InitialiserSocleSecurite
       // Classe  : CLSecurite
@@ -899,12 +899,6 @@ class :
       //   4. Initialise automatiquement la table SessionSecurite.
       //   5. Enregistre les tables nouvellement créées dans le référentiel ORM RAAD.
       // =============================================================================
-     type : 458752
-   -
-     name : InitialiserSocleSecurite
-     procedure_id : 1923060972453680991
-     type_code : 12
-     code : |1-
       PROCÉDURE InitialiserSocleSecurite() : booléen
       
       LOCAL
