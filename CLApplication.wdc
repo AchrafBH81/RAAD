@@ -93,11 +93,32 @@ class :
       l_NomVHost	= a_SocketRecu.m_NomHote
       l_UserAgent	= a_SocketRecu.m_UserAgent
       
+      
+      // ==============================================================================
+      // 2.1 INTERCEPTION DU PREFLIGHT CORS (MÉTHODE OPTIONS)
+      // ==============================================================================
+      // Le navigateur vérifie les autorisations avant d'envoyer les requêtes POST/PUT/DELETE.
+      // On valide immédiatement le contrôle avec un statut 200 OK sans exécuter les routes métier.
+      SI a_SocketRecu.m_TypeRequete = "OPTIONS" ALORS
+      	a_SocketRecu.m_CodeReponse		= "200 OK"
+      	a_SocketRecu.m_extension		= ""
+      	a_SocketRecu.m_ContenuBuffer	= ""
+      	
+      	// Envoi immédiat de la trame de validation CORS sur la socket
+      	a_SocketRecu.GenererReponse()
+      	
+      	// Décrémentation du monitoring avant sortie
+      	m_MonitoringServeur.DecrementerSocketsActifs()
+      	RETOUR
+      FIN
+      
+      
       // ==============================================================================
       // AIGUILLAGE DU ROUTEUR REST (Position = 1 stricte WinDev 25 via l'opérateur [=)
       // ==============================================================================
       // L'utilisation de SELON avec l'opérateur "[=" (commence par) est plus rapide 
       // qu'une cascade de fonctions Position(). Le WLangage gère le "[=" sans casse par défaut.
+      
       
       SELON l_UriDemande
       
@@ -1518,63 +1539,6 @@ class :
       	"SECURITE")
       	
       FIN
-      
-     type : 458752
-   -
-     name : TraiterCORS
-     procedure_id : 1924615132131747740
-     type_code : 12
-     code : |1+
-      // Résumé : Traite le contrôle d'accès CORS et les requêtes préalables (Preflight OPTIONS)
-      // Paramètres :
-      //	a_RequeteHttp : Instance de la requête entrante parsée (contenant Méthode, Headers, etc.)
-      //	a_ReponseHttp : Instance de la réponse HTTP à formater pour le client
-      // Valeur de retour :
-      // 	booléen : Vrai si la requête était un Preflight OPTIONS (réponse immédiate envoyée), Faux si le traitement normal doit continuer
-      
-      PROCÉDURE TraiterCORS(a_RequeteHttp est un CLReqHttp DYNAMIQUE, a_ReponseHttp est un CLReponseHttp DYNAMIQUE) : booléen
-      
-      LOCAL
-      	l_OrigineRequete	est une chaîne
-      	l_EstPreflight		est un booléen
-      	
-      // 1. Récupération de l'origine transmise par le navigateur client
-      l_OrigineRequete = a_RequeteHttp.ObtenirEnTete("Origin")
-      
-      // Si l'en-tête Origin est absent, il s'agit d'un appel direct (ex: Postman/Curl), pas de blocage strict navigateur
-      SI l_OrigineRequete = "" ALORS
-      	l_OrigineRequete = "*"
-      FIN
-      
-      // 2. Injection des en-têtes CORS obligatoires sur la réponse
-      // Autorise l'origine émettrice (ou '*' pour accepter tout domaine en environnement de test/développement)
-      a_ReponseHttp.AjouterEnTete("Access-Control-Allow-Origin", l_OrigineRequete)
-      
-      // Déclare les méthodes HTTP supportées par l'API
-      a_ReponseHttp.AjouterEnTete("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
-      
-      // Déclare les en-têtes HTTP autorisés côté client (requis pour le JSON et l'authentification JWT/Bearer)
-      a_ReponseHttp.AjouterEnTete("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin")
-      
-      // Durée de mise en cache de la réponse de pré-vérification par le navigateur (en secondes, ici 24 heures)
-      a_ReponseHttp.AjouterEnTete("Access-Control-Max-Age", "86400")
-      
-      // Autorise l'envoi d'informations d'identification si besoin (cookies, headers auth)
-      a_ReponseHttp.AjouterEnTete("Access-Control-Allow-Credentials", "true")
-      
-      // 3. Détection et court-circuitage des requêtes préalables OPTIONS
-      SI Majuscule(a_RequeteHttp.m_Methode) = "OPTIONS" ALORS
-      	// Pour une requête OPTIONS, aucun traitement métier ne doit être exécuté
-      	a_ReponseHttp.m_CodeStatut		= 204
-      	a_ReponseHttp.m_MessageStatut	= "No Content"
-      	a_ReponseHttp.m_Corps			= ""
-      	
-      	l_EstPreflight					= Vrai
-      SINON
-      	l_EstPreflight = Faux
-      FIN
-      
-      RENVOYER l_EstPreflight
       
      type : 458752
   procedure_templates : []

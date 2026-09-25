@@ -352,11 +352,14 @@ class :
       LOCAL
       	l_Valeur		est une chaîne = [
       HTTP/1.1 %1
-      Accept-Ranges:bytes
-      Content-Length:%2
-      Server:RaaD 1.2
-      Date:%3
-      Connection:Keep-Alive
+      Access-Control-Allow-Origin: *
+      Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+      Access-Control-Allow-Headers: *
+      Accept-Ranges: bytes
+      Content-Length: %2
+      Server: RaaD 1.2
+      Date: %3
+      Connection: Keep-Alive
       ]
       	l_DateServeur	est une DateHeure = DateHeureLocaleVersUTC(DateHeureSys())
       
